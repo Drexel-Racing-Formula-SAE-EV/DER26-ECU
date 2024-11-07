@@ -36,25 +36,31 @@ void rtd_task_fn(void *arg)
 		data->tsal = HAL_GPIO_ReadPin(TSAL_HV_SIG_GPIO_Port, TSAL_HV_SIG_Pin);
 		data->rtd_button = HAL_GPIO_ReadPin(RTD_Go_GPIO_Port, RTD_Go_Pin);
 		data->cascadia_ok = !HAL_GPIO_ReadPin(MTR_Ok_GPIO_Port, MTR_Ok_Pin);
+		
 
 		// state machine (as described in Teams -> Electrical - Firmware -> Files -> RTD_FSM.pptx)
 		switch(data->rtd_mode)
 		{
-			case TSAL_AWAIT:
+			case RTD_AWAIT_TSAL:
 				if(data->tsal)
 				{
-					data->rtd_mode = RTD_BUTTON_AWAIT;
+					data->rtd_mode = RTD_AWAIT_BUTTON_FALSE;
 				}
 				break;
 			
-			case RTD_BUTTON_AWAIT:
-				if(data->rtd_button)
+			case RTD_AWAIT_BUTTON_FALSE:
+				if(!data->rtd_button)
 				{
-					data->rtd_mode = RTD_CONDITIONS_AWAIT;
+					data->rtd_mode = RTD_AWAIT_CONDITIONS;
+				}
+
+				if(!data->tsal)
+				{
+					data->rtd_mode = RTD_AWAIT_TSAL;
 				}
 				break;
 
-			case RTD_CONDITIONS_AWAIT:
+			case RTD_AWAIT_CONDITIONS:
 				if(data->cascadia_ok && data->brakelight && data->rtd_button)
 				{
 					data->rtd_mode = RTD_ENABLED;
@@ -62,28 +68,34 @@ void rtd_task_fn(void *arg)
 					osDelay(3000);
 					set_buzzer(0);
 				}
+
+				if(!data->tsal)
+				{
+					data->rtd_mode = RTD_AWAIT_TSAL;
+				}
 				break;
 
 			case RTD_ENABLED:
-				if(!data->rtd_button)
+				if(!data->cascadia_ok || !data->brakelight || !data->rtd_button)
 				{
-					data->rtd_mode = RTD_CONDITIONS_AWAIT;
+					data->rtd_mode = RTD_AWAIT_CONDITIONS;
 				}
-				break;
-		}
-		
-		// from any state
-		if(!data->tsal)
-		{
-			data->rtd_mode = TSAL_AWAIT;
-		}
 
-		// Trip Shutdown circuit
-		if(!data->hard_fault && data->tsal)
-		{
-			set_fw(0);
-			osDelay(delay);
-			set_fw(1);
+				if(!data->tsal)
+				{
+					data->rtd_mode = RTD_AWAIT_TSAL;
+				}
+
+				// for any state transition out of RTD_ENABLE w/o a hard fault
+				if (data->rtd_mode != RTD_ENABLED)
+				{
+					set_fw(0);
+					osDelay(delay);
+					set_fw(1);
+
+				}
+
+				break;
 		}
 		osDelay(delay);
 	}

@@ -30,7 +30,7 @@ void app_create()
 	app.throttle = 0;
 	app.brake = 0;
 
-	app.rtd_mode = TSAL_AWAIT;
+	app.rtd_mode = RTD_AWAIT_TSAL;
 
 	app.hard_fault = false;
 	app.soft_fault = false;

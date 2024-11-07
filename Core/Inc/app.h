@@ -52,11 +52,11 @@
 #define MAXTRQ 160 // maximum nM of toruqe that will be requested from motorcontroller (=100% throttle)
 
 typdef enum {
-	TSAL_AWAIT,
-	RTD_CONDITIONS_AWAIT,
-	RTD_BUTTON_AWAIT,
+	RTD_AWAIT_TSAL,
+	RTD_AWAIT_BUTTON_FALSE,
+	RTD_AWAIT_CONDITIONS,
 	RTD_ENABLED
-} rdt_state_t
+} rdt_state_t;
 
 typedef struct {
 	int throttle;
