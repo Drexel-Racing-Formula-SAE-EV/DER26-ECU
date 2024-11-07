@@ -29,10 +29,13 @@ TaskHandle_t rtd_task_start(app_data_t *data)
 void rtd_task_fn(void *arg)
 {
     app_data_t *data = (app_data_t *)arg;
-    uint32_t delay;
+    uint32_t trip_delay = 100;
+    uint32_t entry;
 
 	for(;;)
 	{
+        entry = osKernelGetTickCount();
+
 		data->tsal = HAL_GPIO_ReadPin(TSAL_HV_SIG_GPIO_Port, TSAL_HV_SIG_Pin);
 		data->rtd_button = HAL_GPIO_ReadPin(RTD_Go_GPIO_Port, RTD_Go_Pin);
 		data->cascadia_ok = !HAL_GPIO_ReadPin(MTR_Ok_GPIO_Port, MTR_Ok_Pin);
@@ -76,7 +79,7 @@ void rtd_task_fn(void *arg)
 				break;
 
 			case RTD_ENABLED:
-				if(!data->cascadia_ok || !data->brakelight || !data->rtd_button)
+				if(!data->cascadia_ok || !data->rtd_button)
 				{
 					data->rtd_mode = RTD_AWAIT_CONDITIONS;
 				}
@@ -90,13 +93,13 @@ void rtd_task_fn(void *arg)
 				if (data->rtd_mode != RTD_ENABLED)
 				{
 					set_fw(0);
-					osDelay(delay);
+					osDelay(trip_delay);
 					set_fw(1);
 
 				}
 
 				break;
 		}
-		osDelay(delay);
+        osDelayUntil(entry + (1000 / APPS_FREQ));
 	}
 }
