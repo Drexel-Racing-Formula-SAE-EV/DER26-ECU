@@ -29,41 +29,77 @@ TaskHandle_t rtd_task_start(app_data_t *data)
 void rtd_task_fn(void *arg)
 {
     app_data_t *data = (app_data_t *)arg;
-    uint32_t delay;
+    uint32_t trip_delay = 100;
+    uint32_t entry;
 
 	for(;;)
 	{
+        entry = osKernelGetTickCount();
+
 		data->tsal = HAL_GPIO_ReadPin(TSAL_HV_SIG_GPIO_Port, TSAL_HV_SIG_Pin);
 		data->rtd_button = HAL_GPIO_ReadPin(RTD_Go_GPIO_Port, RTD_Go_Pin);
 		data->cascadia_ok = !HAL_GPIO_ReadPin(MTR_Ok_GPIO_Port, MTR_Ok_Pin);
-		if(!data->rtd_state)
-		{
-			delay = 50;
-			// EV.10.4.3
-			if(data->tsal && data->brakelight && data->rtd_button && data->cascadia_ok)
-			{
-				set_buzzer(1);
-				osDelay(3000);
-				set_buzzer(0);
-				data->rtd_state = true;
-			}
-		}
-		else
-		{
-			delay = 100;
-			if(!data->tsal || !data->rtd_button)
-			{
-				data->rtd_state = false;
-				if(!data->hard_fault && data->tsal)
-				{
-					// Trip Shutdown circuit
-					set_fw(0);
-					osDelay(delay);
-					set_fw(1);
-				}
-			}
-		}
 		
-		osDelay(delay);
+
+		// state machine (as described in Teams -> Electrical - Firmware -> Files -> RTD_FSM.pptx)
+		switch(data->rtd_mode)
+		{
+			case RTD_AWAIT_TSAL:
+				if(data->tsal)
+				{
+					data->rtd_mode = RTD_AWAIT_BUTTON_FALSE;
+				}
+				break;
+			
+			case RTD_AWAIT_BUTTON_FALSE:
+				if(!data->rtd_button)
+				{
+					data->rtd_mode = RTD_AWAIT_CONDITIONS;
+				}
+
+				if(!data->tsal)
+				{
+					data->rtd_mode = RTD_AWAIT_TSAL;
+				}
+				break;
+
+			case RTD_AWAIT_CONDITIONS:
+				if(data->cascadia_ok && data->brakelight && data->rtd_button)
+				{
+					data->rtd_mode = RTD_ENABLED;
+					set_buzzer(1);
+					osDelay(3000);
+					set_buzzer(0);
+				}
+
+				if(!data->tsal)
+				{
+					data->rtd_mode = RTD_AWAIT_TSAL;
+				}
+				break;
+
+			case RTD_ENABLED:
+				if(!data->cascadia_ok || !data->rtd_button)
+				{
+					data->rtd_mode = RTD_AWAIT_CONDITIONS;
+				}
+
+				if(!data->tsal)
+				{
+					data->rtd_mode = RTD_AWAIT_TSAL;
+				}
+
+				// for any state transition out of RTD_ENABLE w/o a hard fault
+				if (data->rtd_mode != RTD_ENABLED)
+				{
+					set_fw(0);
+					osDelay(trip_delay);
+					set_fw(1);
+
+				}
+
+				break;
+		}
+        osDelayUntil(entry + (1000 / APPS_FREQ));
 	}
 }
