@@ -28,10 +28,10 @@
 
 // 0.12V - 1.8V * (3/2) resistor divider => 0.18V - 2.7V
 #define BSE1_MIN 280//Brake emulator min: 155 //Theoretical value (ADC max): 339
-#define BSE1_MAX 600 //Brake emulator max: 2240 //Theoretical value (ADC max): 1900
+#define BSE1_MAX 900 //Brake emulator max: 2240 //Theoretical value (ADC max): 1900
 // 0.14V -1.8V *(3/2) => 0.21V - 2.7V
-#define BSE2_MIN 305 //Brake emulator min: 175 //Theoretical value (ADC max): 810
-#define BSE2_MAX 960 //Brake emulator max: 2250 //Theoretical value (ADC max): 2158
+#define BSE2_MIN 280 //Brake emulator min: 175 //Theoretical value (ADC max): 810
+#define BSE2_MAX 950//Brake emulator max: 2250 //Theoretical value (ADC max): 2158
 // TODO: Calibrate
 // 0.5V-4.5V Sensor output * 2/3 VDiv = 0.33V-3V * 4095 / 3.3V = 413Ct-3723Ct
 #define COOL_PRESS_MIN 413
@@ -43,15 +43,15 @@
 #define COOL_TEMP1_CH 15
 #define COOL_TEMP2_CH 14
 
-#define APPS1_0 85
-#define APPS1_100 195
-#define APPS2_0 95
-#define APPS2_100 305
+#define APPS1_0 90
+#define APPS1_100 230
+#define APPS2_0 100
+#define APPS2_100 490
 
 #define CANBUS_ISR 	0x2	// Notification bit value for ISR messages
 #define CANBUS_APPS	0x1 // Notification bit value for APPS messages 
 
-#define ECU_CANBUS_ID 0x420
+#define ECU_CANBUS_ID 0x69
 #define CM_CANBUS_ID 0x0C0
 
 typedef struct {

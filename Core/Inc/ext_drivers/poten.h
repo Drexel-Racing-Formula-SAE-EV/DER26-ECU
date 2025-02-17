@@ -15,7 +15,7 @@
 #include <stdint.h>
 #include "stm32f7xx_hal.h"
 
-#define HISTSZ 50
+#define HISTSZ 10
 
 typedef struct {
 	uint16_t min;
