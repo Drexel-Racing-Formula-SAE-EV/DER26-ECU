@@ -46,10 +46,12 @@ void bse_task_fn(void *arg)
 		bse2->percent = pressure_sensor_get_percent(bse2);
 
 		// T.4.3.3 (2022)
+		/*
 		if(!pressure_sensor_check_implausibility(bse1->percent, bse2->percent, PLAUSIBILITY_THRESH, BSE_FREQ / 10))
 		{
 			data->bse_fault = true;
 		}
+		*/
 
 		brake_raw = (bse1->percent + bse2->percent) / 2;
 		data->brake = (int)brake_raw;

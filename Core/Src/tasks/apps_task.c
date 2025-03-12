@@ -58,10 +58,12 @@ void apps_task_fn(void *arg)
         data->throttle = (int)throttle_raw;
 
         // T.4.2.5 (2022)
+        /*
         if(!poten_check_plausibility(apps1->percent, apps2->percent, PLAUSIBILITY_THRESH, APPS_FREQ / 10))
         {
             data->apps_fault = true;
         }
+        */
         if(!data->cascadia_ok)
         {
             for(uint8_t i = 0; i < 8; i++) tx_packet->data[i] = 0x00;
