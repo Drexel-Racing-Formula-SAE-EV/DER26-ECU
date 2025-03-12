@@ -82,10 +82,8 @@ void apps_task_fn(void *arg)
         else
         {
             throttle_hex = (uint16_t)(data->throttle * MAXTRQ / 10.0); // CM CANBus Protocol
-            //tx_packet->data[0] = TO_LSB(throttle_hex);
-            //tx_packet->data[1] = TO_MSB(throttle_hex);
-            tx_packet->data[0] = 0;
-            tx_packet->data[1] = 0;
+            tx_packet->data[0] = TO_LSB(throttle_hex);
+            tx_packet->data[1] = TO_MSB(throttle_hex);
             tx_packet->data[2] = 0;
             tx_packet->data[3] = 0;
             tx_packet->data[4] = 1; // Forward direction

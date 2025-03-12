@@ -50,7 +50,7 @@
 #define DASH_PRIO 4
 #define COOL_PRIO 3
 
-#define MAXTRQ 160 // maximum nM of toruqe that will be requested from motorcontroller (=100% throttle)
+#define MAXTRQ 50 // maximum nM of toruqe that will be requested from motorcontroller (=100% throttle)
 
 typedef enum {
 	RTD_AWAIT_TSAL,
