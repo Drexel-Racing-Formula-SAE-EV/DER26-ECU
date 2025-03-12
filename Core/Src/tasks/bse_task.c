@@ -43,7 +43,8 @@ void bse_task_fn(void *arg)
 		stm32f767_adc_switch_channel(bse2->handle, bse2->channel);
 		bse2->count = stm32f767_adc_read(bse2->handle);
 		bse1->percent = pressure_sensor_get_percent(bse1);
-		bse2->percent = pressure_sensor_get_percent(bse2);
+		//bse2->percent = pressure_sensor_get_percent(bse2);
+		bse2->percent = bse1->percent;
 
 		// T.4.3.3 (2022)
 		/*
