@@ -12,6 +12,7 @@
 #include "tasks/rtd_task.h"
 #include "main.h"
 
+#define TRIP_DELAY 100
 /**
 * @brief Actual RTD task function
 *
@@ -29,7 +30,6 @@ TaskHandle_t rtd_task_start(app_data_t *data)
 void rtd_task_fn(void *arg)
 {
     app_data_t *data = (app_data_t *)arg;
-    uint32_t trip_delay = 100;
     uint32_t entry;
 
 	for(;;)
@@ -42,7 +42,6 @@ void rtd_task_fn(void *arg)
 		data->rtd_button = HAL_GPIO_ReadPin(RTD_Go_GPIO_Port, RTD_Go_Pin);
 		data->cascadia_ok = !HAL_GPIO_ReadPin(MTR_Ok_GPIO_Port, MTR_Ok_Pin);
 		
-
 		// state machine (as described in Teams -> Electrical - Firmware -> Files -> RTD_FSM.pptx)
 		switch(data->rtd_mode)
 		{
@@ -95,7 +94,7 @@ void rtd_task_fn(void *arg)
 				if (data->rtd_mode != RTD_ENABLED)
 				{
 					set_ecu_ok(0);
-					osDelay(trip_delay);
+					osDelay(TRIP_DELAY);
 					set_ecu_ok(1);
 
 				}

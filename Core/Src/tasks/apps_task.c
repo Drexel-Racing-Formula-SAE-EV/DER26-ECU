@@ -58,7 +58,7 @@ void apps_task_fn(void *arg)
         data->throttle = (int)throttle_raw;
 
         // T.4.2.5 (2022)
-        /*
+        /* TODO: Implement plausibility check for real version
         if(!poten_check_plausibility(apps1->percent, apps2->percent, PLAUSIBILITY_THRESH, APPS_FREQ / 10))
         {
             data->apps_fault = true;

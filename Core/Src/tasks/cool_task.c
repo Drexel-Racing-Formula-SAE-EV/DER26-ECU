@@ -52,7 +52,7 @@ void cool_task_fn(void *arg)
 	{
 		entry = osKernelGetTickCount();
 
-		// TODO: Calibrate coolant sensors
+		// TODO: Finish calibrating coolant sensors
 		stm32f767_adc_switch_channel(press->handle, press->channel);
 		press->count = stm32f767_adc_read(press->handle);
 		press->percent = pressure_sensor_get_percent(press);
@@ -72,7 +72,7 @@ void cool_task_fn(void *arg)
 		data->coolant_temp_out = temp2->temp;
 
 		// TODO: determine pump speed requirements
-		pwm_set_percent(pump, 0);
+		pwm_set_percent(pump, 50);
 
 		data->coolant_fault = check_coolant_fault(data);
 
