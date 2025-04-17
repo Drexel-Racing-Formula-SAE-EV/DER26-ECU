@@ -401,6 +401,8 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim) {
 	extern app_data_t app;
 	flow_sensor_t *cool_flow = &app.board.cool_flow;
 
-	if(htim->Instance == cool_flow->htim->Instance && htim->Channel == cool_flow->total_channel) flow_sensor_read(cool_flow);
+	if(htim->Instance == cool_flow->htim->Instance){
+		flow_sensor_read(cool_flow);
+	}
 }
 /* USER CODE END 1 */

@@ -20,8 +20,8 @@
 #include "ext_drivers/rtc.h"
 
 #define VER_MAJOR 2
-#define VER_MINOR 1
-#define VER_BUG   1
+#define VER_MINOR 2
+#define VER_BUG   0
 
 #define PLAUSIBILITY_THRESH 10
 #define BRAKE_LIGHT_THRESH 5
@@ -33,15 +33,15 @@
 #define APPS_FREQ 20
 #define BSE_FREQ 20
 #define BPPC_FREQ 20
-#define CLI_FREQ 10
+#define CLI_FREQ 5
 #define ACC_FREQ 5
 #define DASH_FREQ 5
 #define COOL_FREQ 5
 #define RTD_FREQ 5
 
 #define ERR_PRIO 17
-#define RTD_PRIO 16
-#define CLI_PRIO 15
+#define CLI_PRIO 16
+#define RTD_PRIO 15
 #define CAN_PRIO 14
 #define APPS_PRIO 10
 #define BPPC_PRIO 8
@@ -115,7 +115,7 @@ void app_create();
 void cli_putline(char *line);
 HAL_StatusTypeDef read_time();
 HAL_StatusTypeDef write_time();
-void set_fw(bool state);
+void set_ecu_ok(bool state);
 void set_buzzer(bool state);
 void set_cascadia_enable(bool state);
 void set_brakelight(bool state);

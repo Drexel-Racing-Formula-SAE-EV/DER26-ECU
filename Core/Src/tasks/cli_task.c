@@ -55,7 +55,7 @@ command_t cmds[] =
 TaskHandle_t cli_task_start(app_data_t *data)
 {
    TaskHandle_t handle;
-   xTaskCreate(cli_task_fn, "CLI task", 256, (void *)data, CLI_PRIO, &handle);
+   xTaskCreate(cli_task_fn, "CLI task", 1024, (void *)data, CLI_PRIO, &handle);
    return handle;
 }
 
@@ -68,6 +68,7 @@ void cli_task_fn(void *arg)
     char *tokens[MAXTOKS];
     int n;
     int ret = 0;
+    size_t len;
 	
 	cli_printline(cli, "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
 	cli_printline(cli, "Type 'help' for list of commands");
@@ -78,13 +79,15 @@ void cli_task_fn(void *arg)
 		if(cli->msg_pending == true)
 		{
 			taskENTER_CRITICAL();
-			memcpy(buf, cli->line, strlen(cli->line) + 1);
-			memset(cli->line, 0, strlen(cli->line) + 1);
+			len = strnlen(cli->line, CLI_LINESZ - 1);
+			memcpy(buf, cli->line, len + 1);
+			memset(cli->line, 0, len + 1);
+			cli->msg_pending = false;
+			taskEXIT_CRITICAL();
+			buf[len] = '\0';
 			n = tokenize(buf, tokens, MAXTOKS, " \t");
 			ret = cli_handle_cmd(n, tokens);
-			taskEXIT_CRITICAL();
 			data->cli_fault = ret;
-			cli->msg_pending = false;
 			cli->msg_proc++;
 		}
 		osDelayUntil(entry + (1000 / CLI_FREQ));
@@ -218,6 +221,7 @@ int set_time(int argc, char *argv[])
 			data->datetime.second
 			);
 	cli_printline(cli, outline);
+
 	return 0;
 }
 

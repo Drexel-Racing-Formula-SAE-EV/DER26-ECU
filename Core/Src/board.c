@@ -21,7 +21,7 @@ void board_init(board_t *dev)
 	pressure_sensor_init(&dev->bse1, BSE1_MIN, BSE1_MAX, &dev->stm32f767.hadc3, BSE1_ADC_CH);
 	pressure_sensor_init(&dev->bse2, BSE2_MIN, BSE2_MAX, &dev->stm32f767.hadc3, BSE2_ADC_CH);
 	pressure_sensor_init(&dev->cool_pressure, COOL_PRESS_MIN, COOL_PRESS_MAX, &dev->stm32f767.hadc3, COOL_PRESS_ADC_CH);
-	flow_sensor_init(&dev->cool_flow, 54000000, &dev->stm32f767.htim5, TIM5, TIM_CHANNEL_2, TIM_CHANNEL_1);
+	flow_sensor_init(&dev->cool_flow, 108000000, &dev->stm32f767.htim5, TIM5, TIM_CHANNEL_2, TIM_CHANNEL_1);
 	ntc_init(&dev->cool_temp1, &dev->stm32f767.hadc3, COOL_TEMP1_CH);
 	ntc_init(&dev->cool_temp2, &dev->stm32f767.hadc3, COOL_TEMP2_CH);
 	pwm_device_init(&dev->cool_pump, TIM4, &dev->stm32f767.htim4, 65535, &TIM4->CCR3, 3);
