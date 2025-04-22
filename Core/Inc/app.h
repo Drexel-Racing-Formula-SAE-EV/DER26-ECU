@@ -29,6 +29,8 @@
 #define BPPC_APPS_H_THRESH 25
 #define BPPC_APPS_L_THRESH 5
 
+#define COOLANT_FLOW_MIN 5.0f
+
 #define ERR_FREQ 20
 #define APPS_FREQ 20
 #define BSE_FREQ 20
