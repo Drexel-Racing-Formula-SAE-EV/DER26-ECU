@@ -46,6 +46,8 @@ void app_create()
 	app.mq_fault = false;
 
 	app.fw_state = false;
+	app.fw_override = false;
+	app.fw_override_state = false;
 	app.tsal = false;
 	app.rtd_button = false;
 	app.cascadia_ok = true;
@@ -125,6 +127,16 @@ void set_ecu_ok(bool state)
 {
 	app.fw_state = state;
 	HAL_GPIO_WritePin(Firmware_Ok_GPIO_Port, Firmware_Ok_Pin, state);
+}
+
+void override_ecu_ok(bool state)
+{
+	app.fw_override_state = state;
+}
+
+void apply_ecu_ok_override(bool state)
+{
+	app.fw_override = state;
 }
 
 void set_buzzer(bool state)

@@ -72,7 +72,7 @@ void cool_task_fn(void *arg)
 		data->coolant_temp_out = temp2->temp;
 
 		// TODO: determine pump speed requirements
-		pwm_set_percent(pump, 100);
+		pwm_set_percent(pump, 50);
 
 		data->coolant_fault = check_coolant_fault(data);
 
@@ -83,7 +83,7 @@ void cool_task_fn(void *arg)
 bool check_coolant_fault(app_data_t *data)
 {
 	// TODO: Calibrate and check for faults
-	if(data->coolant_flow < COOLANT_FLOW_MIN) return true;
+	//if(data->coolant_flow < COOLANT_FLOW_MIN) return true;
 	return false;
 }
 

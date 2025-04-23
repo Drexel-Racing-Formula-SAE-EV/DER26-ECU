@@ -44,8 +44,8 @@ void bse_task_fn(void *arg)
 		bse2->count = stm32f767_adc_read(bse2->handle);
 		bse1->percent = pressure_sensor_get_percent(bse1);
 		// TODO: test BSE2 and restore it
-		//bse2->percent = pressure_sensor_get_percent(bse2);
-		bse2->percent = bse1->percent;
+		bse2->percent = pressure_sensor_get_percent(bse2);
+		//bse2->percent = bse1->percent;
 
 		// T.4.3.3 (2022)
 		/* TODO: Implement plausibility check for real version

@@ -81,6 +81,8 @@ typedef struct {
 	bool mq_fault;
 	
 	bool fw_state;
+	bool fw_override;
+	bool fw_override_state;
 	bool tsal;
 	bool rtd_button;
 	bool cascadia_ok;
@@ -118,6 +120,8 @@ void cli_putline(char *line);
 HAL_StatusTypeDef read_time();
 HAL_StatusTypeDef write_time();
 void set_ecu_ok(bool state);
+void override_ecu_ok(bool state);
+void apply_ecu_ok_override(bool state);
 void set_buzzer(bool state);
 void set_cascadia_enable(bool state);
 void set_brakelight(bool state);

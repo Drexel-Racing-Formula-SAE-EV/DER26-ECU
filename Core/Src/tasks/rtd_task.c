@@ -39,6 +39,7 @@ void rtd_task_fn(void *arg)
 		data->tsal = HAL_GPIO_ReadPin(TSAL_HV_SIG_GPIO_Port, TSAL_HV_SIG_Pin);
 		/* TODO: undo these changes once TSAL is working properly */
 		data->tsal = data->board.ams.air_state;
+		data->tsal = true;
 		data->rtd_button = HAL_GPIO_ReadPin(RTD_Go_GPIO_Port, RTD_Go_Pin);
 		data->cascadia_ok = !HAL_GPIO_ReadPin(MTR_Ok_GPIO_Port, MTR_Ok_Pin);
 		
@@ -93,9 +94,10 @@ void rtd_task_fn(void *arg)
 				// for any state transition out of RTD_ENABLE w/o a hard fault
 				if (data->rtd_mode != RTD_ENABLED)
 				{
-					set_ecu_ok(0);
+					override_ecu_ok(0);
+					apply_ecu_ok_override(1);
 					osDelay(TRIP_DELAY);
-					set_ecu_ok(1);
+					apply_ecu_ok_override(0);
 
 				}
 
