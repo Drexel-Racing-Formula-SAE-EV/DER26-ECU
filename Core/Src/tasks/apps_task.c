@@ -75,7 +75,7 @@ void apps_task_fn(void *arg)
             tx_packet->data[1] = 0;
             tx_packet->data[2] = 0;
             tx_packet->data[3] = 0;
-            tx_packet->data[4] = 1; // Forward direction
+            tx_packet->data[4] = 0; // Backward direction
             tx_packet->data[5] = 0; // Disable inverter
             tx_packet->data[6] = 0;
             tx_packet->data[7] = 0;
@@ -87,7 +87,7 @@ void apps_task_fn(void *arg)
             tx_packet->data[1] = TO_MSB(throttle_hex);
             tx_packet->data[2] = 0;
             tx_packet->data[3] = 0;
-            tx_packet->data[4] = 1; // Forward direction
+            tx_packet->data[4] = 0; // Backward direction
             tx_packet->data[5] = 1; // Enable inverter
             tx_packet->data[6] = 0;
             tx_packet->data[7] = 0;
