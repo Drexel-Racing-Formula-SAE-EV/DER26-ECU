@@ -66,14 +66,14 @@ void apps_task_fn(void *arg)
         {
             for(uint8_t i = 0; i < 8; i++) tx_packet->data[i] = 0x00;
         }
-        else if(data->hard_fault || data->apps_fault || !data->rtd_state)
+        else if(data->hard_fault || data->apps_fault || data->rtd_mode != RTD_ENABLED)
         {
             tx_packet->data[0] = 0;
             tx_packet->data[1] = 0;
             tx_packet->data[2] = 0;
             tx_packet->data[3] = 0;
-            tx_packet->data[4] = 1; // Forward direction
-            tx_packet->data[5] = 0; // Disable inverter
+            tx_packet->data[4] = 0; // Direction: 0-backward, 1-forward (motor is mounted backwards
+            tx_packet->data[5] = 0; // Inverter Enable: 0-disable, 1-enable
             tx_packet->data[6] = 0;
             tx_packet->data[7] = 0;
         }
@@ -84,8 +84,8 @@ void apps_task_fn(void *arg)
             tx_packet->data[1] = TO_MSB(throttle_hex);
             tx_packet->data[2] = 0;
             tx_packet->data[3] = 0;
-            tx_packet->data[4] = 1; // Forward direction
-            tx_packet->data[5] = 1; // Enable inverter
+            tx_packet->data[4] = 0; // Direction: 0-backward, 1-forward (motor is mounted backwards
+            tx_packet->data[5] = 1; // Inverter Enable: 0-disable, 1-enable
             tx_packet->data[6] = 0;
             tx_packet->data[7] = 0;
         }

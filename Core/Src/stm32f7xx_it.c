@@ -375,9 +375,12 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
     };
 
 	for (uint8_t i = 0; i < 8; i++) rx_packet->data[i] = 0x00;
+	rx_header.ExtId = 0;
+	rx_header.StdId = 0;
+	rx_header.IDE = 0;
 	HAL_CAN_GetRxMessage(canbus->hcan, CAN_RX_FIFO0, &rx_header, rx_packet->data);
 	rx_packet->id = rx_header.StdId;
-	if(rx_packet->id == ECU_CANBUS_ID)
+	if(rx_packet->id == ECU_CANBUS_ID && rx_header.IDE == CAN_ID_STD)
 	{
 		uint16_t header = ((uint16_t)rx_packet->data[0] << 8) | rx_packet->data[1];
 		uint16_t data0  = ((uint16_t)rx_packet->data[2] << 8) | rx_packet->data[3];
@@ -398,6 +401,8 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim) {
 	extern app_data_t app;
 	flow_sensor_t *cool_flow = &app.board.cool_flow;
 
-	if(htim->Instance == cool_flow->htim->Instance && htim->Channel == cool_flow->total_channel) flow_sensor_read(cool_flow);
+	if(htim->Instance == cool_flow->htim->Instance){
+		flow_sensor_read(cool_flow);
+	}
 }
 /* USER CODE END 1 */

@@ -20,8 +20,8 @@
 #include "ext_drivers/rtc.h"
 
 #define VER_MAJOR 2
-#define VER_MINOR 1
-#define VER_BUG   1
+#define VER_MINOR 2
+#define VER_BUG   0
 
 #define PLAUSIBILITY_THRESH 10
 #define BRAKE_LIGHT_THRESH 5
@@ -29,18 +29,21 @@
 #define BPPC_APPS_H_THRESH 25
 #define BPPC_APPS_L_THRESH 5
 
+#define COOLANT_FLOW_MIN 5.0f
+
 #define ERR_FREQ 20
 #define APPS_FREQ 20
 #define BSE_FREQ 20
 #define BPPC_FREQ 20
-#define CLI_FREQ 10
+#define CLI_FREQ 5
 #define ACC_FREQ 5
 #define DASH_FREQ 5
 #define COOL_FREQ 5
+#define RTD_FREQ 5
 
 #define ERR_PRIO 17
-#define RTD_PRIO 16
-#define CLI_PRIO 15
+#define CLI_PRIO 16
+#define RTD_PRIO 15
 #define CAN_PRIO 14
 #define APPS_PRIO 10
 #define BPPC_PRIO 8
@@ -49,13 +52,20 @@
 #define DASH_PRIO 4
 #define COOL_PRIO 3
 
-#define MAXTRQ 160 // maximum nM of toruqe that will be requested from motorcontroller (=100% throttle)
+#define MAXTRQ 50 // maximum nM of toruqe that will be requested from motorcontroller (=100% throttle)
+
+typedef enum {
+	RTD_AWAIT_TSAL,
+	RTD_AWAIT_BUTTON_FALSE,
+	RTD_AWAIT_CONDITIONS,
+	RTD_ENABLED
+} rtd_state_t;
 
 typedef struct {
 	int throttle;
 	int brake;
 
-	bool rtd_state;
+	rtd_state_t rtd_mode;
 
 	bool hard_fault;
 	bool soft_fault;
@@ -71,6 +81,8 @@ typedef struct {
 	bool mq_fault;
 	
 	bool fw_state;
+	bool fw_override;
+	bool fw_override_state;
 	bool tsal;
 	bool rtd_button;
 	bool cascadia_ok;
@@ -107,7 +119,9 @@ void app_create();
 void cli_putline(char *line);
 HAL_StatusTypeDef read_time();
 HAL_StatusTypeDef write_time();
-void set_fw(bool state);
+void set_ecu_ok(bool state);
+void override_ecu_ok(bool state);
+void apply_ecu_ok_override(bool state);
 void set_buzzer(bool state);
 void set_cascadia_enable(bool state);
 void set_brakelight(bool state);

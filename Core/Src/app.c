@@ -30,7 +30,7 @@ void app_create()
 	app.throttle = 0;
 	app.brake = 0;
 
-	app.rtd_state = false;
+	app.rtd_mode = RTD_AWAIT_TSAL;
 
 	app.hard_fault = false;
 	app.soft_fault = false;
@@ -46,6 +46,8 @@ void app_create()
 	app.mq_fault = false;
 
 	app.fw_state = false;
+	app.fw_override = false;
+	app.fw_override_state = false;
 	app.tsal = false;
 	app.rtd_button = false;
 	app.cascadia_ok = true;
@@ -105,6 +107,7 @@ HAL_StatusTypeDef write_time(){
 	RTC_TimeTypeDef rTime;
 	RTC_DateTypeDef rDate;
 	HAL_StatusTypeDef ret = 0;
+	RTC_HandleTypeDef *rtc = &app.board.stm32f767.hrtc;
 
 	rTime.Seconds = HEX2DEC(app.datetime.second);
 	rTime.Minutes = HEX2DEC(app.datetime.minute);
@@ -114,19 +117,26 @@ HAL_StatusTypeDef write_time(){
 	rDate.Year = HEX2DEC(app.datetime.year);
 	rDate.WeekDay = RTC_WEEKDAY_MONDAY;
 
-	ret |= HAL_RTC_SetTime(&app.board.stm32f767.hrtc, &rTime, RTC_FORMAT_BCD);
-	ret |= HAL_RTC_SetDate(&app.board.stm32f767.hrtc, &rDate, RTC_FORMAT_BCD);
-	HAL_PWR_EnableBkUpAccess();
-	HAL_RTCEx_BKUPWrite(&app.board.stm32f767.hrtc, RTC_BKP_DR1, 0x32F2);
-    HAL_PWR_DisableBkUpAccess();
+	ret |= HAL_RTC_SetTime(rtc, &rTime, RTC_FORMAT_BCD);
+	ret |= HAL_RTC_SetDate(rtc, &rDate, RTC_FORMAT_BCD);
 
 	return ret;
 }
 
-void set_fw(bool state)
+void set_ecu_ok(bool state)
 {
 	app.fw_state = state;
 	HAL_GPIO_WritePin(Firmware_Ok_GPIO_Port, Firmware_Ok_Pin, state);
+}
+
+void override_ecu_ok(bool state)
+{
+	app.fw_override_state = state;
+}
+
+void apply_ecu_ok_override(bool state)
+{
+	app.fw_override = state;
 }
 
 void set_buzzer(bool state)

@@ -50,14 +50,14 @@ void bppc_task_fn(void *arg)
 			if(throttleReleased)
 			{
 				data->bppc_fault = false;
-				set_fw(1);
+				set_ecu_ok(1);
 			}
 		}
 		else if(brakesEnganged && throttleEngaged)
 		{
 			// EV.4.7.2 (2024)
 			data->bppc_fault = true;
-			set_fw(0);
+			set_ecu_ok(0);
 		}
 
 		osDelayUntil(entry + (1000 / BPPC_FREQ));

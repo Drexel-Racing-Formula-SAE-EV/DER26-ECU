@@ -29,17 +29,12 @@ TaskHandle_t error_task_start(app_data_t *data)
 void error_task_fn(void *arg)
 {
 	app_data_t *data = (app_data_t *)arg;
-	RTC_HandleTypeDef *hrtc = &data->board.stm32f767.hrtc;
 
     uint32_t entry;
 
     for(;;)
     {
         entry = osKernelGetTickCount();
-
-        HAL_PWR_EnableBkUpAccess();
-        HAL_RTCEx_BKUPWrite(hrtc, RTC_BKP_DR0, '*');
-        HAL_PWR_DisableBkUpAccess();
 
         data->cascadia_error = HAL_GPIO_ReadPin(MTR_Fault_GPIO_Port, MTR_Fault_Pin);
 		data->imd_fail = HAL_GPIO_ReadPin(IMD_Fail_GPIO_Port, IMD_Fail_Pin);
@@ -62,8 +57,10 @@ void error_task_fn(void *arg)
 						   data->dashboard_fault
 						   );
 
-        set_fw(!data->coolant_fault);
-		set_cascadia_enable(!data->hard_fault);
+        if(data->fw_override) set_ecu_ok(data->fw_override_state);
+        else set_ecu_ok(!data->coolant_fault);
+        // I believe this needs to be set low on an APPS/BSE fault (rules say disable inverter but no need to disable tractive system)
+        set_cascadia_enable(!data->hard_fault);
 
         osDelayUntil(entry + (1000 / ERR_FREQ));
     }
