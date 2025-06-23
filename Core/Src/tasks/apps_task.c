@@ -52,19 +52,16 @@ void apps_task_fn(void *arg)
         apps1->count = stm32f767_adc_read(apps1->handle);
         apps2->count = stm32f767_adc_read(apps2->handle);
         apps1->percent = poten_get_percent(apps1);
-        //apps2->percent = poten_get_percent(apps2);
-        apps2->percent = apps1->percent;
+        apps2->percent = poten_get_percent(apps2);
 
         throttle_raw = (apps1->percent + apps2->percent) / 2;
         data->throttle = (int)throttle_raw;
 
         // T.4.2.5 (2022)
-        /* TODO: Implement plausibility check for real version
         if(!poten_check_plausibility(apps1->percent, apps2->percent, PLAUSIBILITY_THRESH, APPS_FREQ / 10))
         {
             data->apps_fault = true;
         }
-        */
         if(!data->cascadia_ok)
         {
             for(uint8_t i = 0; i < 8; i++) tx_packet->data[i] = 0x00;
@@ -75,8 +72,8 @@ void apps_task_fn(void *arg)
             tx_packet->data[1] = 0;
             tx_packet->data[2] = 0;
             tx_packet->data[3] = 0;
-            tx_packet->data[4] = 0; // Backward direction
-            tx_packet->data[5] = 0; // Disable inverter
+            tx_packet->data[4] = 0; // Direction: 0-backward, 1-forward (motor is mounted backwards
+            tx_packet->data[5] = 0; // Inverter Enable: 0-disable, 1-enable
             tx_packet->data[6] = 0;
             tx_packet->data[7] = 0;
         }
@@ -87,8 +84,8 @@ void apps_task_fn(void *arg)
             tx_packet->data[1] = TO_MSB(throttle_hex);
             tx_packet->data[2] = 0;
             tx_packet->data[3] = 0;
-            tx_packet->data[4] = 0; // Backward direction
-            tx_packet->data[5] = 1; // Enable inverter
+            tx_packet->data[4] = 0; // Direction: 0-backward, 1-forward (motor is mounted backwards
+            tx_packet->data[5] = 1; // Inverter Enable: 0-disable, 1-enable
             tx_packet->data[6] = 0;
             tx_packet->data[7] = 0;
         }

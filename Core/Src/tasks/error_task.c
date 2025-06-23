@@ -59,9 +59,8 @@ void error_task_fn(void *arg)
 
         if(data->fw_override) set_ecu_ok(data->fw_override_state);
         else set_ecu_ok(!data->coolant_fault);
-		//set_cascadia_enable(!data->hard_fault);
-        // For testing. may not be necessary
-        set_cascadia_enable(1);
+        // I believe this needs to be set low on an APPS/BSE fault (rules say disable inverter but no need to disable tractive system)
+        set_cascadia_enable(!data->hard_fault);
 
         osDelayUntil(entry + (1000 / ERR_FREQ));
     }
