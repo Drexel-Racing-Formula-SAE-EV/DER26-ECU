@@ -1,4 +1,4 @@
-# DER 2024 ECU Firmware v2.1.1
+# DER 2024 ECU Firmware v2.2.0
 
 Designed and writen by Cole Bardin (cab572)
 
