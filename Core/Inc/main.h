@@ -124,6 +124,7 @@ void MX_TIM4_Init(void);
 #define CoolPump_GPIO_Port GPIOB
 
 /* USER CODE BEGIN Private defines */
+#define SD_SPI_HANDLE hspi6
 
 /* USER CODE END Private defines */
 
