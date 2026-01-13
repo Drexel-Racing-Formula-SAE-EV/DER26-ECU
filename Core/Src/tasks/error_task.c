@@ -54,7 +54,8 @@ void error_task_fn(void *arg)
         				   data->cli_fault ||
 						   data->acc_fault ||
 						   data->canbus_fault ||
-						   data->dashboard_fault
+						   data->dashboard_fault ||
+						   data->log_fault
 						   );
 
         if(data->fw_override) set_ecu_ok(data->fw_override_state);

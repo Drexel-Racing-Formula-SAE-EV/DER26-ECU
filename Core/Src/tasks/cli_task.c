@@ -250,6 +250,8 @@ int get_faults(int argc, char *argv[])
 	cli_printline(cli, outline);
 	snprintf(outline, CLI_LINESZ, "  mq:      %d", data->mq_fault);
 	cli_printline(cli, outline);
+	snprintf(outline, CLI_LINESZ, "  log:      %d", data->log_fault);
+	cli_printline(cli, outline);
 	return 0;
 }
 
