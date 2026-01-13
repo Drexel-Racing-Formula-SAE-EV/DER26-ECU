@@ -22,6 +22,7 @@
 #include "tasks/acc_task.h"
 #include "tasks/dashboard_task.h"
 #include "tasks/cool_task.h"
+#include "tasks/log_task.h"
 
 app_data_t app = {0};
 
@@ -44,6 +45,7 @@ void app_create()
 	app.canbus_fault = false;
 	app.dashboard_fault = false;
 	app.mq_fault = false;
+	app.log_fault = false;
 
 	app.fw_state = false;
 	app.fw_override = false;
@@ -83,6 +85,7 @@ void app_create()
 	assert(app.acc_task = acc_task_start(&app));
 	assert(app.dashboard_task = dashboard_task_start(&app));
 	assert(app.cool_task = cool_task_start(&app));
+	assert(app.log_task = log_task_start(&app));
 }
 
 HAL_StatusTypeDef read_time(){

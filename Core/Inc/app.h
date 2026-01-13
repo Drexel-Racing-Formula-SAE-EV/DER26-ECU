@@ -40,6 +40,7 @@
 #define DASH_FREQ 5
 #define COOL_FREQ 5
 #define RTD_FREQ 5
+#define LOG_FREQ 1
 
 #define ERR_PRIO 17
 #define CLI_PRIO 16
@@ -48,9 +49,11 @@
 #define APPS_PRIO 10
 #define BPPC_PRIO 8
 #define BSE_PRIO 7
+#define LOG_PRIO 6
 #define ACC_PRIO 5
 #define DASH_PRIO 4
 #define COOL_PRIO 3
+
 
 #define MAXTRQ 50 // maximum nM of toruqe that will be requested from motorcontroller (=100% throttle)
 
@@ -79,6 +82,7 @@ typedef struct {
 	bool canbus_fault;
 	bool dashboard_fault;
 	bool mq_fault;
+	bool log_fault;
 	
 	bool fw_state;
 	bool fw_override;
@@ -113,6 +117,7 @@ typedef struct {
 	TaskHandle_t acc_task;
 	TaskHandle_t dashboard_task;
 	TaskHandle_t cool_task;
+	TaskHandle_t log_task;
 } app_data_t;
 
 void app_create();
