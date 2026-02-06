@@ -307,6 +307,7 @@ void MX_ADC2_Init(void)
 
   /* USER CODE END ADC2_Init 0 */
 
+
   ADC_ChannelConfTypeDef sConfig = {0};
 
   /* USER CODE BEGIN ADC2_Init 1 */
