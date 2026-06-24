@@ -36,4 +36,6 @@ uint16_t poten_percent_to_hex(float percent);
 
 uint8_t poten_check_plausibility(float L, float R, int thresh, int count);
 
+uint8_t poten_check_failure(float count, int max_thresh, int min_thresh);
+
 #endif

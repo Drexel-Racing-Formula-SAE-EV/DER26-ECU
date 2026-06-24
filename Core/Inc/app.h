@@ -52,7 +52,7 @@
 #define DASH_PRIO 4
 #define COOL_PRIO 3
 
-#define MAXTRQ 50 // maximum nM of toruqe that will be requested from motorcontroller (=100% throttle)
+#define MAXTRQ 200 // maximum nM of toruqe that will be requested from motorcontroller (=100% throttle)
 
 typedef enum {
 	RTD_AWAIT_TSAL,
@@ -88,6 +88,7 @@ typedef struct {
 	bool cascadia_ok;
 	bool cascadia_error;
 	bool cascadia_en;
+	bool cascadia_on;
 	bool imd_fail;
 	bool bms_fail;
 	bool bspd_fail;
@@ -124,6 +125,7 @@ void override_ecu_ok(bool state);
 void apply_ecu_ok_override(bool state);
 void set_buzzer(bool state);
 void set_cascadia_enable(bool state);
+void set_cascadia_on(bool state);
 void set_brakelight(bool state);
 void set_ssa(int duty);
 

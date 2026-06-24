@@ -69,9 +69,13 @@ void app_create()
 
 	board_init(&app.board);
     set_cascadia_enable(1);
+    osDelay(3000);
+    set_cascadia_on(1);
 
 	HAL_UART_Receive_IT(app.board.cli.huart, &app.board.cli.c, 1);
 	HAL_CAN_ActivateNotification(app.board.canbus.hcan, CAN_IT_RX_FIFO0_MSG_PENDING);
+
+//	HAL_Delay(2);
 
 	assert(app.cli_task = cli_task_start(&app));
 	assert(app.rtd_task = rtd_task_start(&app));
@@ -83,6 +87,7 @@ void app_create()
 	assert(app.acc_task = acc_task_start(&app));
 	assert(app.dashboard_task = dashboard_task_start(&app));
 	assert(app.cool_task = cool_task_start(&app));
+
 }
 
 HAL_StatusTypeDef read_time(){
@@ -148,6 +153,12 @@ void set_cascadia_enable(bool state)
 {
 	app.cascadia_en = state;
 	HAL_GPIO_WritePin(MTR_EN_GPIO_Port, MTR_EN_Pin, state);
+}
+
+void set_cascadia_on(bool state)
+{
+	app.cascadia_on = state;
+	HAL_GPIO_WritePin(Cascadia_ON_GPIO_Port, Cascadia_ON_Pin, state);
 }
 
 void set_brakelight(bool state)

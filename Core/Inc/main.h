@@ -92,6 +92,8 @@ void MX_TIM4_Init(void);
 #define CoolFlow_GPIO_Port GPIOA
 #define APPS1_Pin GPIO_PIN_3
 #define APPS1_GPIO_Port GPIOA
+#define Cascadia_ON_Pin GPIO_PIN_5
+#define Cascadia_ON_GPIO_Port GPIOA
 #define Firmware_Ok_Pin GPIO_PIN_7
 #define Firmware_Ok_GPIO_Port GPIOA
 #define TSAL_HV_SIG_Pin GPIO_PIN_5

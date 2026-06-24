@@ -51,22 +51,45 @@ void apps_task_fn(void *arg)
 
         apps1->count = stm32f767_adc_read(apps1->handle);
         apps2->count = stm32f767_adc_read(apps2->handle);
+
+
+//        if(!poten_check_failure(apps1->count, APPS_IMPLAUSIBILITY_MAX, APPS_IMPLAUSIBILITY_MIN) ||
+//           !poten_check_failure(apps2->count, APPS_IMPLAUSIBILITY_MAX, APPS_IMPLAUSIBILITY_MIN))
+//        {
+//        	data->apps_fault = true;
+//        } else {
+//
+//        }
+
         apps1->percent = poten_get_percent(apps1);
         apps2->percent = poten_get_percent(apps2);
 
-        throttle_raw = (apps1->percent + apps2->percent) / 2;
+        throttle_raw = 100 - ((apps1->percent + apps2->percent) / 2);
+//        throttle_raw = 100 - apps2->percent;
+        if(throttle_raw < 0){
+        	throttle_raw = 0;
+        }
+//        if(throttle_raw > 15){
+//        	throttle_raw = 15;
+//        }
         data->throttle = (int)throttle_raw;
 
         // T.4.2.5 (2022)
         if(!poten_check_plausibility(apps1->percent, apps2->percent, PLAUSIBILITY_THRESH, APPS_FREQ / 10))
         {
             data->apps_fault = true;
+        } else if(!poten_check_failure(apps1->count, APPS_IMPLAUSIBILITY_MAX, APPS_IMPLAUSIBILITY_MIN) ||
+                  !poten_check_failure(apps2->count, APPS_IMPLAUSIBILITY_MAX, APPS_IMPLAUSIBILITY_MIN)) {
+        	data->apps_fault = true;
+        } else {
+        	data->apps_fault = false;
         }
+
         if(!data->cascadia_ok)
         {
             for(uint8_t i = 0; i < 8; i++) tx_packet->data[i] = 0x00;
         }
-        else if(data->hard_fault || data->apps_fault || data->rtd_mode != RTD_ENABLED)
+        else if(data->hard_fault || data->apps_fault || data->rtd_mode != RTD_ENABLED || data->bppc_fault || data->bse_fault)
         {
             tx_packet->data[0] = 0;
             tx_packet->data[1] = 0;
@@ -84,7 +107,7 @@ void apps_task_fn(void *arg)
             tx_packet->data[1] = TO_MSB(throttle_hex);
             tx_packet->data[2] = 0;
             tx_packet->data[3] = 0;
-            tx_packet->data[4] = 0; // Direction: 0-backward, 1-forward (motor is mounted backwards
+            tx_packet->data[4] = 1; // Direction: 0-backward, 1-forward (motor is mounted backwards
             tx_packet->data[5] = 1; // Inverter Enable: 0-disable, 1-enable
             tx_packet->data[6] = 0;
             tx_packet->data[7] = 0;

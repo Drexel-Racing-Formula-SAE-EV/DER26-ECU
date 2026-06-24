@@ -40,9 +40,15 @@ void bppc_task_fn(void *arg)
 		entry = osKernelGetTickCount();
 
 		// EV.4.7.1 (2024)
-		brakesEnganged = (data->brake > BPPC_BSE_THRESH);
-		throttleEngaged = (data->throttle > BPPC_APPS_H_THRESH);
+		brakesEnganged   = (data->brake > BPPC_BSE_THRESH);
+		throttleEngaged  = (data->throttle > BPPC_APPS_H_THRESH);
 		throttleReleased = (data->throttle < BPPC_APPS_L_THRESH);
+
+		if(brakesEnganged){
+			HAL_GPIO_WritePin(Brake_Light_GPIO_Port, Brake_Light_Pin, 1);
+		} else {
+			HAL_GPIO_WritePin(Brake_Light_GPIO_Port, Brake_Light_Pin, 0);
+		}
 
 		if(data->bppc_fault)
 		{
@@ -50,14 +56,14 @@ void bppc_task_fn(void *arg)
 			if(throttleReleased)
 			{
 				data->bppc_fault = false;
-				set_ecu_ok(1);
+//				set_ecu_ok(1);
 			}
 		}
 		else if(brakesEnganged && throttleEngaged)
 		{
 			// EV.4.7.2 (2024)
 			data->bppc_fault = true;
-			set_ecu_ok(0);
+//			set_ecu_ok(0);
 		}
 
 		osDelayUntil(entry + (1000 / BPPC_FREQ));

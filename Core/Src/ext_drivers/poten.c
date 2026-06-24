@@ -64,3 +64,11 @@ uint8_t poten_check_plausibility(float L, float R, int thresh, int count)
 		return 1;
 	}
 }
+
+uint8_t poten_check_failure(float count, int max_thresh, int min_thresh){
+	if(count > max_thresh || count < min_thresh){
+		return 0;
+	} else {
+		return 1;
+	}
+}

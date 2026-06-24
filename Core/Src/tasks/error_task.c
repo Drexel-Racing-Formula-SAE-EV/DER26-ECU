@@ -44,15 +44,20 @@ void error_task_fn(void *arg)
 		if(!data->board.ams.air_state && !data->imd_fail && !data->bms_fail && !data->bspd_fail) set_ssa(100);
 		else set_ssa(0);
 
-		data->hard_fault = (data->apps_fault ||
-				            data->bse_fault ||
-							data->coolant_fault ||
+//		data->hard_fault = (data->apps_fault ||
+//				            data->bse_fault ||
+//							data->coolant_fault ||
+//							data->cascadia_error
+//						    );
+		data->hard_fault = (data->coolant_fault ||
 							data->cascadia_error
 						    );
         
-        data->soft_fault =(data->bppc_fault ||
-        				   data->cli_fault ||
-						   data->acc_fault ||
+        data->soft_fault =(data->apps_fault ||
+        				   data->bse_fault  ||
+        				   data->bppc_fault ||
+        				   data->cli_fault  ||
+						   data->acc_fault  ||
 						   data->canbus_fault ||
 						   data->dashboard_fault
 						   );
@@ -62,6 +67,9 @@ void error_task_fn(void *arg)
         // I believe this needs to be set low on an APPS/BSE fault (rules say disable inverter but no need to disable tractive system)
         set_cascadia_enable(!data->hard_fault);
 
+        if(data->hard_fault){
+        	set_ecu_ok(0);
+        }
         osDelayUntil(entry + (1000 / ERR_FREQ));
     }
 }

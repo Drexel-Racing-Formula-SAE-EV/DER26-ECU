@@ -74,7 +74,7 @@ void cool_task_fn(void *arg)
 		// TODO: determine pump speed requirements
 		pwm_set_percent(pump, 50);
 
-		data->coolant_fault = check_coolant_fault(data);
+//		data->coolant_fault = check_coolant_fault(data);
 
 		osDelayUntil(entry + (1000 / COOL_FREQ));
 	}
