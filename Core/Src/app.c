@@ -157,12 +157,6 @@ void set_cascadia_enable(bool state)
 	HAL_GPIO_WritePin(MTR_EN_GPIO_Port, MTR_EN_Pin, state);
 }
 
-void set_cascadia_on(bool state)
-{
-	app.cascadia_on = state;
-	HAL_GPIO_WritePin(Cascadia_ON_GPIO_Port, Cascadia_ON_Pin, state);
-}
-
 void set_brakelight(bool state)
 {
 	app.brakelight = state;

@@ -1,4 +1,4 @@
-/**
+﻿/**
 * @file app.h
 * @author Cole Bardin (cab572@drexel.edu)
 * @brief
@@ -126,7 +126,6 @@ void override_ecu_ok(bool state);
 void apply_ecu_ok_override(bool state);
 void set_buzzer(bool state);
 void set_cascadia_enable(bool state);
-void set_cascadia_on(bool state);
 void set_brakelight(bool state);
 void set_ssa(int duty);
 

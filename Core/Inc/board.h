@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file board.h
  * @author Cole Bardin (cab572@drexel.edu)
  * @brief 
@@ -26,19 +26,19 @@
 #include "ext_drivers/pwm.h"
 #include "ext_drivers/ams.h"
 
-#define APPS1_0 1650
-#define APPS1_100 2350
-#define APPS2_0 400
-#define APPS2_100 1500
+#define APPS1_0 90
+#define APPS1_100 290
+#define APPS2_0 200
+#define APPS2_100 1000
 #define APPS_IMPLAUSIBILITY_MAX 3000
 #define APPS_IMPLAUSIBILITY_MIN 100
 
 // 0.12V - 1.8V * (3/2) resistor divider => 0.18V - 2.7V
-#define BSE1_MIN 280 //Brake emulator min: 155 //Theoretical value (ADC max): 339
-#define BSE1_MAX 1600 //Brake emulator max: 2240 //Theoretical value (ADC max): 1900
+#define BSE1_MIN 350 //Brake emulator min: 155 //Theoretical value (ADC max): 339
+#define BSE1_MAX 650 //Brake emulator max: 2240 //Theoretical value (ADC max): 1900
 // 0.14V -1.8V *(3/2) => 0.21V - 2.7V
-#define BSE2_MIN 280 //Brake emulator min: 175 //Theoretical value (ADC max): 810
-#define BSE2_MAX 1200//Brake emulator max: 2250 //Theoretical value (ADC max): 2158
+#define BSE2_MIN 350 //Brake emulator min: 175 //Theoretical value (ADC max): 810
+#define BSE2_MAX 650//Brake emulator max: 2250 //Theoretical value (ADC max): 2158
 #define BSE_IMPLAUSIBILITY_MAX 3000
 #define BSE_IMPLAUSIBILITY_MIN 100
 
