@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file poten.c
  * @author Cole Bardin (cab572@drexel.edu)
  * @brief 
@@ -55,7 +55,7 @@ uint8_t poten_check_plausibility(float L, float R, int thresh, int count)
 		counts++;
 
 		// If there are consecutive errors for more than 100ms, error
-		return counts <= count;
+		return counts <= (uint32_t)count;
 	}
 	else
 	{

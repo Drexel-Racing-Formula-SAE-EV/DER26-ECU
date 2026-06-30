@@ -1,4 +1,4 @@
-/**
+﻿/**
 * @file stm32f767.c
 * @author Cole Bardin (cab572@drexel.edu)
 * @brief
@@ -12,6 +12,7 @@
 #include "main.h"
 #include "ext_drivers/stm32f767.h"
 #include "ext_drivers/canbus.h"
+#include <assert.h>
 
 const osMutexAttr_t can1_mutex_attr = {
 	.name = "CAN Bus Mutex",

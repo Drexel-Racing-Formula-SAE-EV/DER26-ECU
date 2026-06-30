@@ -1,4 +1,4 @@
-/**
+﻿/**
 * @file app.c
 * @author Cole Bardin (cab572@drexel.edu)
 * @brief
@@ -22,6 +22,7 @@
 #include "tasks/acc_task.h"
 #include "tasks/dashboard_task.h"
 #include "tasks/cool_task.h"
+#include <assert.h>
 
 app_data_t app = {0};
 
