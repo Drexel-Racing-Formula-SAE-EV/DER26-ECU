@@ -13,6 +13,11 @@
 
 void canbus_device_init(canbus_t *dev, CAN_HandleTypeDef *hcan, CAN_TxHeaderTypeDef *tx_header)
 {
+    if((dev == NULL) || (hcan == NULL) || (tx_header == NULL))
+    {
+        return;
+    }
+
     dev->hcan = hcan;
     dev->tx_header = tx_header;
 
@@ -23,5 +28,30 @@ void canbus_device_init(canbus_t *dev, CAN_HandleTypeDef *hcan, CAN_TxHeaderType
     dev->tx_header->DLC = 8;
     dev->tx_header->TransmitGlobalTime = DISABLE;
 
-    HAL_CAN_Start(hcan);
+    (void)HAL_CAN_Start(hcan);
+}
+
+
+HAL_StatusTypeDef canbus_transmit(canbus_t *dev, const canbus_packet_t *packet, uint32_t timeout_ms)
+{
+    uint32_t start;
+
+    if((dev == NULL) || (packet == NULL) || (dev->hcan == NULL) || (dev->tx_header == NULL))
+    {
+        return HAL_ERROR;
+    }
+
+    start = HAL_GetTick();
+    while(HAL_CAN_GetTxMailboxesFreeLevel(dev->hcan) == 0u)
+    {
+        if((uint32_t)(HAL_GetTick() - start) >= timeout_ms)
+        {
+            return HAL_TIMEOUT;
+        }
+        taskYIELD();
+    }
+
+    dev->tx_header->StdId = packet->id;
+    dev->tx_header->DLC = DATALEN;
+    return HAL_CAN_AddTxMessage(dev->hcan, dev->tx_header, (uint8_t *)packet->data, &dev->tx_mailbox);
 }

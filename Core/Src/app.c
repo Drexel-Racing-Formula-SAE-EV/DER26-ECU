@@ -42,6 +42,7 @@ void app_create()
 	app.acc_fault = false;
 	app.cli_fault = false;
 	app.canbus_fault = false;
+	app.ams_fault = false;
 	app.dashboard_fault = false;
 	app.mq_fault = false;
 

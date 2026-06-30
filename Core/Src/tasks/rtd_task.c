@@ -22,14 +22,25 @@ void rtd_task_fn(void *arg);
 
 TaskHandle_t rtd_task_start(app_data_t *data)
 {
-   TaskHandle_t handle;
-   xTaskCreate(rtd_task_fn, "RTD task", 128, (void *)data, 20, &handle);
+   TaskHandle_t handle = NULL;
+
+   if(data == NULL)
+   {
+       return NULL;
+   }
+
+   xTaskCreate(rtd_task_fn, "RTD task", 128, (void *)data, RTD_PRIO, &handle);
    return handle;
 }
 
 void rtd_task_fn(void *arg)
 {
     app_data_t *data = (app_data_t *)arg;
+    if(data == NULL)
+    {
+        vTaskDelete(NULL);
+        return;
+    }
     uint32_t entry;
 
 	for(;;)
@@ -99,6 +110,6 @@ void rtd_task_fn(void *arg)
 
 				break;
 		}
-        osDelayUntil(entry + (1000 / APPS_FREQ));
+        osDelayUntil(entry + (1000 / RTD_FREQ));
 	}
 }

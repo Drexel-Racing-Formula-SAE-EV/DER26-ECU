@@ -31,7 +31,13 @@ float walfront_pressure_convert(float voltage);
 
 TaskHandle_t cool_task_start(app_data_t *data)
 {
-   TaskHandle_t handle;
+   TaskHandle_t handle = NULL;
+
+   if(data == NULL)
+   {
+       return NULL;
+   }
+
    xTaskCreate(cool_task_fn, "COOL task", 128, (void *)data, COOL_PRIO, &handle);
    return handle;
 }
@@ -39,6 +45,11 @@ TaskHandle_t cool_task_start(app_data_t *data)
 void cool_task_fn(void *arg)
 {
     app_data_t *data = (app_data_t *)arg;
+    if(data == NULL)
+    {
+        vTaskDelete(NULL);
+        return;
+    }
     pressure_sensor_t *press = &data->board.cool_pressure;
     flow_sensor_t *flow = &data->board.cool_flow;
     ntc_t *temp1 = &data->board.cool_temp1;

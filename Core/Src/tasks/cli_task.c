@@ -54,7 +54,13 @@ command_t cmds[] =
 
 TaskHandle_t cli_task_start(app_data_t *data)
 {
-   TaskHandle_t handle;
+   TaskHandle_t handle = NULL;
+
+   if(data == NULL)
+   {
+       return NULL;
+   }
+
    xTaskCreate(cli_task_fn, "CLI task", 1024, (void *)data, CLI_PRIO, &handle);
    return handle;
 }
@@ -62,6 +68,12 @@ TaskHandle_t cli_task_start(app_data_t *data)
 void cli_task_fn(void *arg)
 {
     data = (app_data_t *)arg;
+    if(data == NULL)
+    {
+        vTaskDelete(NULL);
+        return;
+    }
+
     cli = &data->board.cli;
     uint32_t entry;
     char buf[CLI_LINESZ] = {0};

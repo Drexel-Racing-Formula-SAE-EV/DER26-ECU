@@ -21,7 +21,13 @@ void error_task_fn(void *arg);
 
 TaskHandle_t error_task_start(app_data_t *data)
 {
-    TaskHandle_t handle;
+    TaskHandle_t handle = NULL;
+
+    if(data == NULL)
+    {
+        return NULL;
+    }
+
     xTaskCreate(error_task_fn, "ERROR task", 128, (void *)data, ERR_PRIO, &handle);
     return handle;
 }
@@ -29,12 +35,20 @@ TaskHandle_t error_task_start(app_data_t *data)
 void error_task_fn(void *arg)
 {
 	app_data_t *data = (app_data_t *)arg;
+    if(data == NULL)
+    {
+        vTaskDelete(NULL);
+        return;
+    }
 
     uint32_t entry;
 
     for(;;)
     {
         entry = osKernelGetTickCount();
+
+        ams_update_stale(&data->board.ams, entry);
+        data->ams_fault = data->board.ams.stale;
 
         data->cascadia_error = HAL_GPIO_ReadPin(MTR_Fault_GPIO_Port, MTR_Fault_Pin);
 		data->imd_fail = HAL_GPIO_ReadPin(IMD_Fail_GPIO_Port, IMD_Fail_Pin);
@@ -59,6 +73,7 @@ void error_task_fn(void *arg)
         				   data->cli_fault  ||
 						   data->acc_fault  ||
 						   data->canbus_fault ||
+                           data->ams_fault ||
 						   data->dashboard_fault
 						   );
 

@@ -24,7 +24,13 @@ void dashboard_task_fn(void *arg);
 
 TaskHandle_t dashboard_task_start(app_data_t *data)
 {
-   TaskHandle_t handle;
+   TaskHandle_t handle = NULL;
+
+   if(data == NULL)
+   {
+       return NULL;
+   }
+
    xTaskCreate(dashboard_task_fn, "Dashboard task", 128, (void *)data, DASH_PRIO, &handle);
    return handle;
 }
@@ -32,6 +38,11 @@ TaskHandle_t dashboard_task_start(app_data_t *data)
 void dashboard_task_fn(void *arg)
 {
     app_data_t *data = (app_data_t *)arg;
+    if(data == NULL)
+    {
+        vTaskDelete(NULL);
+        return;
+    }
     dashboard_t *dash = &data->board.dashboard;
     uint32_t entry;
     HAL_StatusTypeDef ret;

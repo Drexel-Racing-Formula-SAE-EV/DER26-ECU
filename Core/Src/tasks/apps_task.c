@@ -10,13 +10,14 @@
  */
 
 #include <math.h>
+#include <string.h>
 
 #include "main.h"
 #include "tasks/apps_task.h"
 #include "ext_drivers/canbus.h"
 
-#define TO_LSB(x) (x & 0xff)
-#define TO_MSB(x) (x >> 8) & 0xff
+#define TO_LSB(x) ((uint8_t)((x) & 0xffu))
+#define TO_MSB(x) ((uint8_t)(((x) >> 8u) & 0xffu))
 
 /**
  * @brief Actual APPS task function
@@ -27,7 +28,13 @@ void apps_task_fn(void *arg);
 
 TaskHandle_t apps_task_start(app_data_t *data)
 {
-    TaskHandle_t handle;
+    TaskHandle_t handle = NULL;
+
+    if(data == NULL)
+    {
+        return NULL;
+    }
+
     xTaskCreate(apps_task_fn, "APPS task", 128, (void *)data, APPS_PRIO, &handle);
     return handle;
 }
@@ -35,15 +42,21 @@ TaskHandle_t apps_task_start(app_data_t *data)
 void apps_task_fn(void *arg)
 {
     app_data_t *data = (app_data_t *)arg;
+    if(data == NULL)
+    {
+        vTaskDelete(NULL);
+        return;
+    }
     poten_t *apps1 = &data->board.apps1;
     poten_t *apps2 = &data->board.apps2;
-    canbus_packet_t *tx_packet = &data->board.canbus.tx_packet;
+    canbus_packet_t tx_packet;
 
     float throttle_raw;
     uint16_t throttle_hex;
     uint32_t entry;
 
-    tx_packet->id = CM_CANBUS_ID;
+    tx_packet.id = CM_CANBUS_ID;
+    memset(tx_packet.data, 0, sizeof(tx_packet.data));
 
     for(;;)
     {
@@ -87,32 +100,43 @@ void apps_task_fn(void *arg)
 
         if(!data->cascadia_ok)
         {
-            for(uint8_t i = 0; i < 8; i++) tx_packet->data[i] = 0x00;
+            memset(tx_packet.data, 0, sizeof(tx_packet.data));
         }
         else if(data->hard_fault || data->apps_fault || data->rtd_mode != RTD_ENABLED || data->bppc_fault || data->bse_fault)
         {
-            tx_packet->data[0] = 0;
-            tx_packet->data[1] = 0;
-            tx_packet->data[2] = 0;
-            tx_packet->data[3] = 0;
-            tx_packet->data[4] = 0; // Direction: 0-backward, 1-forward (motor is mounted backwards
-            tx_packet->data[5] = 0; // Inverter Enable: 0-disable, 1-enable
-            tx_packet->data[6] = 0;
-            tx_packet->data[7] = 0;
+            tx_packet.data[0] = 0;
+            tx_packet.data[1] = 0;
+            tx_packet.data[2] = 0;
+            tx_packet.data[3] = 0;
+            tx_packet.data[4] = 0; // Direction: 0-backward, 1-forward (motor is mounted backwards
+            tx_packet.data[5] = 0; // Inverter Enable: 0-disable, 1-enable
+            tx_packet.data[6] = 0;
+            tx_packet.data[7] = 0;
         }
         else
         {
             throttle_hex = (uint16_t)(data->throttle * MAXTRQ / 10.0); // CM CANBus Protocol
-            tx_packet->data[0] = TO_LSB(throttle_hex);
-            tx_packet->data[1] = TO_MSB(throttle_hex);
-            tx_packet->data[2] = 0;
-            tx_packet->data[3] = 0;
-            tx_packet->data[4] = 1; // Direction: 0-backward, 1-forward (motor is mounted backwards
-            tx_packet->data[5] = 1; // Inverter Enable: 0-disable, 1-enable
-            tx_packet->data[6] = 0;
-            tx_packet->data[7] = 0;
+            tx_packet.data[0] = TO_LSB(throttle_hex);
+            tx_packet.data[1] = TO_MSB(throttle_hex);
+            tx_packet.data[2] = 0;
+            tx_packet.data[3] = 0;
+            tx_packet.data[4] = 1; // Direction: 0-backward, 1-forward (motor is mounted backwards
+            tx_packet.data[5] = 1; // Inverter Enable: 0-disable, 1-enable
+            tx_packet.data[6] = 0;
+            tx_packet.data[7] = 0;
         }
-    	xTaskNotify(data->canbus_task, CANBUS_APPS, eSetBits);
+        taskENTER_CRITICAL();
+        data->board.canbus.tx_packet = tx_packet;
+        taskEXIT_CRITICAL();
+
+        if(data->canbus_task != NULL)
+        {
+            xTaskNotify(data->canbus_task, CANBUS_APPS, eSetBits);
+        }
+        else
+        {
+            data->canbus_fault = true;
+        }
         osDelayUntil(entry + (1000 / APPS_FREQ));
     }
 }

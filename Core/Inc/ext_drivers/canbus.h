@@ -16,6 +16,7 @@
 #include "stm32f7xx_hal.h"
 
 #define DATALEN 8
+#define CANBUS_TX_TIMEOUT_MS 10u
 
 typedef struct {
     uint32_t id;
@@ -31,5 +32,6 @@ typedef struct {
 } canbus_t;
 
 void canbus_device_init(canbus_t *dev, CAN_HandleTypeDef *hcan, CAN_TxHeaderTypeDef *tx_header);
+HAL_StatusTypeDef canbus_transmit(canbus_t *dev, const canbus_packet_t *packet, uint32_t timeout_ms);
 
 #endif

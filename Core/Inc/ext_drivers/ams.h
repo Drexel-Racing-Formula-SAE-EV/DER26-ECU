@@ -8,12 +8,19 @@
 #ifndef __AMS_H_
 #define __AMS_H_
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #define NSEGS 5
 #define NFANS 10
-#define NVOLTS 14
+#define NVOLTS 15
 #define NTEMPS 17
+
+#define AMS_TELEM_CANBUS_ID 0x69u
+#define AMS_ESTIMATOR_CANBUS_ID 0x421u
+#define AMS_PACKET_COUNT 62u
+#define AMS_FRAME_DLC 8u
+#define AMS_STALE_TIMEOUT_MS 500u
 
 typedef struct
 {
@@ -31,6 +38,14 @@ typedef struct
 
 typedef struct
 {
+	uint16_t words[4];
+	uint32_t last_rx_tick;
+	uint32_t rx_count;
+	bool valid;
+} ams_estimator_status_t;
+
+typedef struct
+{
 	uint16_t state;
 	uint16_t air_state;
 	uint16_t imd_ok;
@@ -42,10 +57,20 @@ typedef struct
 	uint16_t max_volt;
 	segment_t segs[NSEGS];
 	uint16_t fans[NFANS];
+	ams_estimator_status_t estimator;
+	uint32_t last_rx_tick;
+	uint32_t rx_count;
+	uint32_t bad_rx_count;
+	uint16_t last_packet_header;
+	bool stale;
 } ams_t;
 
 void segment_init(segment_t *dev);
 void ams_init(ams_t *dev);
+bool ams_parse_telemetry_frame(ams_t *dev, const uint8_t *data, uint8_t dlc, uint32_t now_ms);
+bool ams_parse_estimator_frame(ams_t *dev, const uint8_t *data, uint8_t dlc, uint32_t now_ms);
+bool ams_parse_can_frame(ams_t *dev, uint32_t std_id, bool is_standard, uint8_t dlc, const uint8_t *data, uint32_t now_ms);
+void ams_update_stale(ams_t *dev, uint32_t now_ms);
 
 
 #endif /* __AMS_H_ */

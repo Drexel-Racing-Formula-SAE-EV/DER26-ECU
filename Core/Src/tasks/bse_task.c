@@ -21,7 +21,13 @@ void bse_task_fn(void *arg);
 
 TaskHandle_t bse_task_start(app_data_t *data)
 {
-   TaskHandle_t handle;
+   TaskHandle_t handle = NULL;
+
+   if(data == NULL)
+   {
+       return NULL;
+   }
+
    xTaskCreate(bse_task_fn, "BSE task", 128, (void *)data, BSE_PRIO, &handle);
    return handle;
 }
@@ -29,6 +35,11 @@ TaskHandle_t bse_task_start(app_data_t *data)
 void bse_task_fn(void *arg)
 {
     app_data_t *data = (app_data_t *)arg;
+    if(data == NULL)
+    {
+        vTaskDelete(NULL);
+        return;
+    }
     pressure_sensor_t *bse1 = &data->board.bse1;
     pressure_sensor_t *bse2 = &data->board.bse2;
     float brake_raw;

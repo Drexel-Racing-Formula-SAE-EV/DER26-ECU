@@ -21,7 +21,13 @@ void bppc_task_fn(void *arg);
 
 TaskHandle_t bppc_task_start(app_data_t *data)
 {
-   TaskHandle_t handle;
+   TaskHandle_t handle = NULL;
+
+   if(data == NULL)
+   {
+       return NULL;
+   }
+
    xTaskCreate(bppc_task_fn, "BPPC task", 128, (void *)data, BPPC_PRIO, &handle);
    return handle;
 }
@@ -29,6 +35,11 @@ TaskHandle_t bppc_task_start(app_data_t *data)
 void bppc_task_fn(void *arg)
 {
     app_data_t *data = (app_data_t *)arg;
+    if(data == NULL)
+    {
+        vTaskDelete(NULL);
+        return;
+    }
 	   
     uint32_t entry;
 	bool brakesEnganged = false;
@@ -43,12 +54,6 @@ void bppc_task_fn(void *arg)
 		brakesEnganged   = (data->brake > BPPC_BSE_THRESH);
 		throttleEngaged  = (data->throttle > BPPC_APPS_H_THRESH);
 		throttleReleased = (data->throttle < BPPC_APPS_L_THRESH);
-
-		if(brakesEnganged){
-			HAL_GPIO_WritePin(Brake_Light_GPIO_Port, Brake_Light_Pin, 1);
-		} else {
-			HAL_GPIO_WritePin(Brake_Light_GPIO_Port, Brake_Light_Pin, 0);
-		}
 
 		if(data->bppc_fault)
 		{

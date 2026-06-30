@@ -3,3 +3,17 @@ Debug/*
 *.settings
 *.vscode
 *.launch
+
+# CI/headless build outputs
+build/
+ci_artifacts/
+host_tests/build/
+*.elf
+*.bin
+*.hex
+*.map
+*.list
+*.lst
+*.su
+*.o
+*.d

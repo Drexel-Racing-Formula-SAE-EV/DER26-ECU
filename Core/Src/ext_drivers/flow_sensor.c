@@ -9,6 +9,11 @@
 
 void flow_sensor_init(flow_sensor_t *dev, uint32_t clock_freq, TIM_HandleTypeDef *htim, TIM_TypeDef *tim, HAL_TIM_ActiveChannel high_channel, HAL_TIM_ActiveChannel total_channel)
 {
+	if((dev == NULL) || (htim == NULL))
+	{
+		return;
+	}
+
 	dev->clock_freq = clock_freq;
 	dev->htim = htim;
 	dev->tim = tim;
@@ -26,12 +31,23 @@ void flow_sensor_init(flow_sensor_t *dev, uint32_t clock_freq, TIM_HandleTypeDef
 
 int flow_sensor_read(flow_sensor_t *dev)
 {
-	dev->total_count = HAL_TIM_ReadCapturedValue(dev->htim, dev->total_channel);
-	if (dev->total_count != 0)
+	if((dev == NULL) || (dev->htim == NULL) || (dev->clock_freq == 0u))
 	{
-		// calculate the Duty Cycle
-		dev->duty = (float)(HAL_TIM_ReadCapturedValue(dev->htim, dev->high_channel) * 100) / (float)dev->total_count;
+		return -1;
+	}
+
+	dev->total_count = HAL_TIM_ReadCapturedValue(dev->htim, dev->total_channel);
+	if (dev->total_count != 0u)
+	{
+		dev->high_count = HAL_TIM_ReadCapturedValue(dev->htim, dev->high_channel);
+		dev->duty = ((float)dev->high_count * 100.0f) / (float)dev->total_count;
 		dev->freq = (float)dev->clock_freq / (float)dev->total_count;
+	}
+	else
+	{
+		dev->high_count = 0u;
+		dev->duty = 0.0f;
+		dev->freq = 0.0f;
 	}
 	return 0;
 }

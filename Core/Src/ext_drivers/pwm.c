@@ -9,6 +9,11 @@
 
 int pwm_device_init(pwm_t *dev, TIM_TypeDef *timer, TIM_HandleTypeDef *htim, uint64_t max_timer_val, volatile uint32_t *CCR, int channel)
 {
+	if((dev == NULL) || (htim == NULL) || (CCR == NULL) || (max_timer_val == 0u))
+	{
+		return -1;
+	}
+
 	dev->timer = timer;
 	dev->htim = htim;
 	dev->channel = channel;
@@ -23,9 +28,14 @@ int pwm_device_init(pwm_t *dev, TIM_TypeDef *timer, TIM_HandleTypeDef *htim, uin
 
 int pwm_set_percent(pwm_t *dev, float percent)
 {
-	if(percent > 100.0) percent = 100;
-	else if(percent < 0) percent = 0;
+	if((dev == NULL) || (dev->CCR == NULL))
+	{
+		return -1;
+	}
+
+	if(percent > 100.0f) percent = 100.0f;
+	else if(percent < 0.0f) percent = 0.0f;
 	dev->duty_cycle = percent;
-	*(dev->CCR) = (volatile uint32_t)dev->max_timer_val * (volatile uint32_t)percent / 100;
+	*(dev->CCR) = (uint32_t)(((float)dev->max_timer_val * percent) / 100.0f);
 	return 0;
 }
