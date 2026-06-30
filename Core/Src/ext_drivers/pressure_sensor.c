@@ -1,4 +1,4 @@
-﻿/**
+/**
 * @file pressure_sensor.c
 * @author Cole Bardin (cab572@drexel.edu)
 * @brief

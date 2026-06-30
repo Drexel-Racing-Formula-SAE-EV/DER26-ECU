@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file poten.c
  * @author Cole Bardin (cab572@drexel.edu)
  * @brief 

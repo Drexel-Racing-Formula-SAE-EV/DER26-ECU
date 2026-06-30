@@ -42,13 +42,16 @@ void error_task_fn(void *arg)
     }
 
     uint32_t entry;
+    uint32_t cascadia_enable_tick = 0u;
 
     for(;;)
     {
         entry = osKernelGetTickCount();
+        bool cascadia_enable_allowed;
 
         ams_update_stale(&data->board.ams, entry);
         data->ams_fault = data->board.ams.stale;
+        data->canbus_fault = (data->canbus_rx_fault || data->canbus_tx_fault);
 
         data->cascadia_error = HAL_GPIO_ReadPin(MTR_Fault_GPIO_Port, MTR_Fault_Pin);
 		data->imd_fail = HAL_GPIO_ReadPin(IMD_Fail_GPIO_Port, IMD_Fail_Pin);
@@ -79,11 +82,33 @@ void error_task_fn(void *arg)
 
         if(data->fw_override) set_ecu_ok(data->fw_override_state);
         else set_ecu_ok(!data->coolant_fault);
-        // I believe this needs to be set low on an APPS/BSE fault (rules say disable inverter but no need to disable tractive system)
-        set_cascadia_enable(!data->hard_fault);
+
+        cascadia_enable_allowed = !(data->hard_fault ||
+                                    data->imd_fail ||
+                                    data->bms_fail ||
+                                    data->bspd_fail);
+        if(cascadia_enable_allowed)
+        {
+            if(!data->cascadia_en)
+            {
+                set_cascadia_on(0);
+                set_cascadia_enable(1);
+                cascadia_enable_tick = entry;
+            }
+            else if((uint32_t)(entry - cascadia_enable_tick) >= 3000u)
+            {
+                set_cascadia_on(1);
+            }
+        }
+        else
+        {
+            set_cascadia_on(0);
+            set_cascadia_enable(0);
+            cascadia_enable_tick = entry;
+        }
 
         if(data->hard_fault){
-        	set_ecu_ok(0);
+            set_ecu_ok(0);
         }
         osDelayUntil(entry + (1000 / ERR_FREQ));
     }

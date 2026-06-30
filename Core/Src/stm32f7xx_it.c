@@ -320,7 +320,7 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
 
 	if(HAL_CAN_GetRxMessage(canbus->hcan, CAN_RX_FIFO0, &rx_header, rx_packet->data) != HAL_OK)
     {
-        app.canbus_fault = true;
+        app.canbus_rx_fault = true;
         return;
     }
 
@@ -333,10 +333,14 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
                                       rx_packet->data,
                                       osKernelGetTickCount());
 
-    if(!parsed && (rx_header.IDE == CAN_ID_STD) &&
-       ((rx_header.StdId == AMS_TELEM_CANBUS_ID) || (rx_header.StdId == AMS_ESTIMATOR_CANBUS_ID)))
+	if(!parsed && (rx_header.IDE == CAN_ID_STD) &&
+	   ((rx_header.StdId == AMS_TELEM_CANBUS_ID) || (rx_header.StdId == AMS_ESTIMATOR_CANBUS_ID)))
     {
-        app.canbus_fault = true;
+        app.canbus_rx_fault = true;
+    }
+    else if(parsed)
+    {
+        app.canbus_rx_fault = false;
     }
 }
 

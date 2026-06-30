@@ -258,6 +258,10 @@ int get_faults(int argc, char *argv[])
 	cli_printline(cli, outline);
 	snprintf(outline, CLI_LINESZ, "  canbus:  %d", data->canbus_fault);
 	cli_printline(cli, outline);
+	snprintf(outline, CLI_LINESZ, "    rx:    %d", data->canbus_rx_fault);
+	cli_printline(cli, outline);
+	snprintf(outline, CLI_LINESZ, "    tx:    %d", data->canbus_tx_fault);
+	cli_printline(cli, outline);
 	snprintf(outline, CLI_LINESZ, "  dash:    %d", data->dashboard_fault);
 	cli_printline(cli, outline);
 	snprintf(outline, CLI_LINESZ, "  mq:      %d", data->mq_fault);

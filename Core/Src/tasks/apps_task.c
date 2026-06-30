@@ -102,7 +102,18 @@ void apps_task_fn(void *arg)
         {
             memset(tx_packet.data, 0, sizeof(tx_packet.data));
         }
-        else if(data->hard_fault || data->apps_fault || data->rtd_mode != RTD_ENABLED || data->bppc_fault || data->bse_fault)
+        else if(data->hard_fault ||
+                data->apps_fault ||
+                data->rtd_mode != RTD_ENABLED ||
+                data->bppc_fault ||
+                data->bse_fault ||
+                data->ams_fault ||
+                data->canbus_fault ||
+                data->canbus_rx_fault ||
+                data->canbus_tx_fault ||
+                data->imd_fail ||
+                data->bms_fail ||
+                data->bspd_fail)
         {
             tx_packet.data[0] = 0;
             tx_packet.data[1] = 0;
@@ -135,7 +146,7 @@ void apps_task_fn(void *arg)
         }
         else
         {
-            data->canbus_fault = true;
+            data->canbus_tx_fault = true;
         }
         osDelayUntil(entry + (1000 / APPS_FREQ));
     }

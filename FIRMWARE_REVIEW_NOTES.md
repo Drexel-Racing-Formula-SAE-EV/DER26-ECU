@@ -41,10 +41,21 @@ Review focus: logic errors, undefined behavior, unsafe concurrency, parser bound
    - Returns zero on failed start/poll instead of blocking indefinitely.
    - `stm32f767_adc_switch_channel` now rejects null handles.
 
+9. **Safety gating cleanup**
+   - Cascadia enable/on are initialized low during startup and only driven after `error_task` evaluates the current fault inputs.
+   - Cascadia ON preserves the original 3 second delay after Cascadia enable.
+   - AMS stale, CAN RX/TX faults, and BMS/IMD/BSPD fail inputs now block the motor-controller torque command in `apps_task`.
+   - CAN RX and TX fault ownership is split before being aggregated into `canbus_fault`.
+   - BSE range and dual-sensor plausibility checks are both active.
+   - RTD entry now requires the safety-relevant ECU fault state to be clear, and RTD exits if one of those faults appears.
+
+10. **Task creation cleanup**
+    - Task handles are assigned before assertion checks, so release builds with `NDEBUG` cannot compile out task creation side effects.
+
 ## Items intentionally not changed
 
 - Fault policy in `error_task.c` was not changed because hard/soft fault behavior may be a team/rules design choice.
-- Coolant fault remains effectively disabled because calibration appears unfinished and forcing it active could create unwanted shutdown behavior.
+- Coolant fault remains effectively disabled because calibration appears unfinished and forcing it active could create unwanted shutdown behavior. This still needs hardware calibration before vehicle use.
 - RTD state machine semantics were not changed beyond priority/frequency cleanup.
 - ISR-based AMS parsing was left intact because the parser is bounded and small; moving to a queue would be a bigger architectural change.
 - CLI UART echo behavior was not rewritten because it changes interactive behavior and needs hardware validation.

@@ -1,4 +1,4 @@
-﻿/**
+/**
 * @file app.c
 * @author Cole Bardin (cab572@drexel.edu)
 * @brief
@@ -43,6 +43,8 @@ void app_create()
 	app.acc_fault = false;
 	app.cli_fault = false;
 	app.canbus_fault = false;
+	app.canbus_rx_fault = false;
+	app.canbus_tx_fault = false;
 	app.ams_fault = false;
 	app.dashboard_fault = false;
 	app.mq_fault = false;
@@ -70,25 +72,35 @@ void app_create()
 	app.brake = 0;
 
 	board_init(&app.board);
-    set_cascadia_enable(1);
-    osDelay(3000);
-    set_cascadia_on(1);
+	set_cascadia_enable(0);
+	set_cascadia_on(0);
 
 	HAL_UART_Receive_IT(app.board.cli.huart, &app.board.cli.c, 1);
 	HAL_CAN_ActivateNotification(app.board.canbus.hcan, CAN_IT_RX_FIFO0_MSG_PENDING);
 
 //	HAL_Delay(2);
 
-	assert(app.cli_task = cli_task_start(&app));
-	assert(app.rtd_task = rtd_task_start(&app));
-	assert(app.error_task = error_task_start(&app));
-	assert(app.canbus_task = canbus_task_start(&app));
-	assert(app.bse_task = bse_task_start(&app));
-	assert(app.apps_task = apps_task_start(&app));
-	assert(app.bppc_task = bppc_task_start(&app));
-	assert(app.acc_task = acc_task_start(&app));
-	assert(app.dashboard_task = dashboard_task_start(&app));
-	assert(app.cool_task = cool_task_start(&app));
+	app.cli_task = cli_task_start(&app);
+	app.rtd_task = rtd_task_start(&app);
+	app.error_task = error_task_start(&app);
+	app.canbus_task = canbus_task_start(&app);
+	app.bse_task = bse_task_start(&app);
+	app.apps_task = apps_task_start(&app);
+	app.bppc_task = bppc_task_start(&app);
+	app.acc_task = acc_task_start(&app);
+	app.dashboard_task = dashboard_task_start(&app);
+	app.cool_task = cool_task_start(&app);
+
+	assert(app.cli_task != NULL);
+	assert(app.rtd_task != NULL);
+	assert(app.error_task != NULL);
+	assert(app.canbus_task != NULL);
+	assert(app.bse_task != NULL);
+	assert(app.apps_task != NULL);
+	assert(app.bppc_task != NULL);
+	assert(app.acc_task != NULL);
+	assert(app.dashboard_task != NULL);
+	assert(app.cool_task != NULL);
 
 }
 

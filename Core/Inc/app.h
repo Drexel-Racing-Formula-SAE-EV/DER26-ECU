@@ -77,6 +77,8 @@ typedef struct {
 	bool acc_fault;
 	bool cli_fault;
 	bool canbus_fault;
+	bool canbus_rx_fault;
+	bool canbus_tx_fault;
 	bool ams_fault;
 	bool dashboard_fault;
 	bool mq_fault;

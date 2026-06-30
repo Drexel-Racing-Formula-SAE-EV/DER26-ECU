@@ -43,6 +43,8 @@ void bse_task_fn(void *arg)
     pressure_sensor_t *bse1 = &data->board.bse1;
     pressure_sensor_t *bse2 = &data->board.bse2;
     float brake_raw;
+    bool bse_range_ok;
+    bool bse_plausible;
     uint32_t entry;
 
 	for(;;)
@@ -55,22 +57,15 @@ void bse_task_fn(void *arg)
 		bse2->count = stm32f767_adc_read(bse2->handle);
 
 
-		if(!pressure_sensor_check_failure(bse1->count, BSE_IMPLAUSIBILITY_MAX, BSE_IMPLAUSIBILITY_MIN) ||
-		   !pressure_sensor_check_failure(bse2->count, BSE_IMPLAUSIBILITY_MAX, BSE_IMPLAUSIBILITY_MIN))
-		{
-			data->bse_fault = true;
-		} else {
-			data->bse_fault = false;
-		}
+		bse_range_ok = (pressure_sensor_check_failure(bse1->count, BSE_IMPLAUSIBILITY_MAX, BSE_IMPLAUSIBILITY_MIN) &&
+		                pressure_sensor_check_failure(bse2->count, BSE_IMPLAUSIBILITY_MAX, BSE_IMPLAUSIBILITY_MIN));
 
 		bse1->percent = pressure_sensor_get_percent(bse1);
 		bse2->percent = pressure_sensor_get_percent(bse2);
 
 		// T.4.3.3 (2022)
-//		if(!pressure_sensor_check_implausibility(bse1->percent, bse2->percent, PLAUSIBILITY_THRESH, BSE_FREQ / 10))
-//		{
-//			data->bse_fault = true;
-//		}
+		bse_plausible = pressure_sensor_check_implausibility(bse1->percent, bse2->percent, PLAUSIBILITY_THRESH, BSE_FREQ / 10);
+		data->bse_fault = (!bse_range_ok || !bse_plausible);
 
 		brake_raw = (bse1->percent + bse2->percent) / 2;
 		data->brake = (int)brake_raw;

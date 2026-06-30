@@ -1,4 +1,4 @@
-﻿/**
+/**
 * @file stm32f767.c
 * @author Cole Bardin (cab572@drexel.edu)
 * @brief

@@ -57,7 +57,7 @@ void canbus_task_fn(void *arg)
             memset(canbus->tx_packet.data, 0, sizeof(canbus->tx_packet.data));
             taskEXIT_CRITICAL();
 
-            data->canbus_fault = (canbus_transmit(canbus, &can_packet, CANBUS_TX_TIMEOUT_MS) != HAL_OK);
+            data->canbus_tx_fault = (canbus_transmit(canbus, &can_packet, CANBUS_TX_TIMEOUT_MS) != HAL_OK);
         }
     }
 }
