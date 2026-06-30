@@ -17,7 +17,7 @@
 *
 * @param arg App_data struct pointer converted to void pointer
 */
-void bppc_task_fn(void *arg);
+static void bppc_task_fn(void *arg);
 
 TaskHandle_t bppc_task_start(app_data_t *data)
 {
@@ -32,7 +32,7 @@ TaskHandle_t bppc_task_start(app_data_t *data)
    return handle;
 }
 
-void bppc_task_fn(void *arg)
+static void bppc_task_fn(void *arg)
 {
     app_data_t *data = (app_data_t *)arg;
     if(data == NULL)

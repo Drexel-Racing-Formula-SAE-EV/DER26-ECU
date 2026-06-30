@@ -17,27 +17,40 @@
 
 void pressure_sensor_init(pressure_sensor_t *sensor, uint16_t min, uint16_t max, ADC_HandleTypeDef *handle, uint8_t channel)
 {
+	if(sensor == NULL)
+	{
+		return;
+	}
+
 	sensor->min = min;
 	sensor->max = max;
+	sensor->count = 0u;
+	sensor->percent = 0.0f;
 	sensor->handle = handle;
 	sensor->channel = channel;
 }
 
 float pressure_sensor_get_percent(pressure_sensor_t *root)
 {
-	float percent = (float)map(root->count, root->min, root->max, 0, 100);
-	if(percent > 100.0)
+	float percent;
+
+	if(root == NULL)
 	{
-		return 100.0;
+		return 0.0f;
 	}
-	else if(percent < 0.0)
+
+	percent = map((long)root->count, (long)root->min, (long)root->max, 0L, 100L);
+	if(percent > 100.0f)
 	{
-		return 0.0;
+		percent = 100.0f;
 	}
-	else
+	else if(percent < 0.0f)
 	{
-		return percent;
+		percent = 0.0f;
 	}
+
+	root->percent = percent;
+	return percent;
 }
 
 uint8_t pressure_sensor_check_implausibility(float L, float R, int thresh, int count)
@@ -45,24 +58,25 @@ uint8_t pressure_sensor_check_implausibility(float L, float R, int thresh, int c
     static unsigned int counts = 0;
 
 	// Check if BSE1 and BSE2 are more than 10% different
-	if(fabs(L - R) > thresh)
+	if(fabsf(L - R) > (float)thresh)
 	{
 		counts++;
 		// If there are consecutive errors for more than 100ms, error
-		return counts <= (uint32_t)count;
+		return (counts <= (uint32_t)count) ? 1u : 0u;
 	}
 	else
 	{
 		// If potentiometers are within spec, reset count
 		counts = 0;
-		return 1;
+		return 1u;
 	}
 }
 
-uint8_t pressure_sensor_check_failure(float count, int max_thresh, int min_thresh){
-	if(count > max_thresh || count < min_thresh){
-		return 0;
-	} else {
-		return 1;
+uint8_t pressure_sensor_check_failure(float count, int max_thresh, int min_thresh)
+{
+	if((count > (float)max_thresh) || (count < (float)min_thresh))
+	{
+		return 0u;
 	}
+	return 1u;
 }

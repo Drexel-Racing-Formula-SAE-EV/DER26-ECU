@@ -9,8 +9,8 @@
 *
 */
 
-#ifndef __APP_H_
-#define __APP_H_
+#ifndef ECU_APP_H_
+#define ECU_APP_H_
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -19,40 +19,40 @@
 #include "board.h"
 #include "ext_drivers/rtc.h"
 
-#define VER_MAJOR 2
-#define VER_MINOR 2
-#define VER_BUG   0
+#define VER_MAJOR 2u
+#define VER_MINOR 2u
+#define VER_BUG   0u
 
-#define PLAUSIBILITY_THRESH 10
-#define BRAKE_LIGHT_THRESH 5
-#define BPPC_BSE_THRESH 10
-#define BPPC_APPS_H_THRESH 25
-#define BPPC_APPS_L_THRESH 5
+#define PLAUSIBILITY_THRESH 10u
+#define BRAKE_LIGHT_THRESH 5u
+#define BPPC_BSE_THRESH 10u
+#define BPPC_APPS_H_THRESH 25u
+#define BPPC_APPS_L_THRESH 5u
 
 #define COOLANT_FLOW_MIN 5.0f
 
-#define ERR_FREQ 20
-#define APPS_FREQ 20
-#define BSE_FREQ 20
-#define BPPC_FREQ 20
-#define CLI_FREQ 5
-#define ACC_FREQ 5
-#define DASH_FREQ 5
-#define COOL_FREQ 5
-#define RTD_FREQ 5
+#define ERR_FREQ 20u
+#define APPS_FREQ 20u
+#define BSE_FREQ 20u
+#define BPPC_FREQ 20u
+#define CLI_FREQ 5u
+#define ACC_FREQ 5u
+#define DASH_FREQ 5u
+#define COOL_FREQ 5u
+#define RTD_FREQ 5u
 
-#define ERR_PRIO 17
-#define CLI_PRIO 16
-#define RTD_PRIO 15
-#define CAN_PRIO 14
-#define APPS_PRIO 10
-#define BPPC_PRIO 8
-#define BSE_PRIO 7
-#define ACC_PRIO 5
-#define DASH_PRIO 4
-#define COOL_PRIO 3
+#define ERR_PRIO 17u
+#define CLI_PRIO 16u
+#define RTD_PRIO 15u
+#define CAN_PRIO 14u
+#define APPS_PRIO 10u
+#define BPPC_PRIO 8u
+#define BSE_PRIO 7u
+#define ACC_PRIO 5u
+#define DASH_PRIO 4u
+#define COOL_PRIO 3u
 
-#define MAXTRQ 200 // maximum nM of toruqe that will be requested from motorcontroller (=100% throttle)
+#define MAXTRQ 200u // maximum nM of toruqe that will be requested from motorcontroller (=100% throttle)
 
 typedef enum {
 	RTD_AWAIT_TSAL,
@@ -119,10 +119,10 @@ typedef struct {
 	TaskHandle_t cool_task;
 } app_data_t;
 
-void app_create();
+void app_create(void);
 void cli_putline(char *line);
-HAL_StatusTypeDef read_time();
-HAL_StatusTypeDef write_time();
+HAL_StatusTypeDef read_time(void);
+HAL_StatusTypeDef write_time(void);
 void set_ecu_ok(bool state);
 void override_ecu_ok(bool state);
 void apply_ecu_ok_override(bool state);

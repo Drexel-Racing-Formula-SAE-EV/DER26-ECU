@@ -9,8 +9,8 @@
  * 
  */
 
-#ifndef __ERROR_TASK_H_
-#define __ERROR_TASK_H_
+#ifndef ECU_TASKS_ERROR_TASK_H_
+#define ECU_TASKS_ERROR_TASK_H_
 
 #include "app.h"
 

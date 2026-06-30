@@ -9,7 +9,10 @@
 
 int pwm_device_init(pwm_t *dev, TIM_TypeDef *timer, TIM_HandleTypeDef *htim, uint64_t max_timer_val, volatile uint32_t *CCR, int channel)
 {
-	if((dev == NULL) || (htim == NULL) || (CCR == NULL) || (max_timer_val == 0u))
+	uint32_t hal_channel;
+
+	if((dev == NULL) || (htim == NULL) || (CCR == NULL) || (max_timer_val == 0u) ||
+	   (channel < 1) || (channel > 4))
 	{
 		return -1;
 	}
@@ -20,8 +23,16 @@ int pwm_device_init(pwm_t *dev, TIM_TypeDef *timer, TIM_HandleTypeDef *htim, uin
 	dev->max_timer_val = max_timer_val;
 	dev->CCR = CCR;
 
-	HAL_TIM_PWM_Start(htim, (channel - 1) * 4);
-	pwm_set_percent(dev, 0.0);
+	if(pwm_set_percent(dev, 0.0f) != 0)
+	{
+		return -1;
+	}
+
+	hal_channel = (uint32_t)((channel - 1) * 4);
+	if(HAL_TIM_PWM_Start(htim, hal_channel) != HAL_OK)
+	{
+		return -1;
+	}
 
 	return 0;
 }

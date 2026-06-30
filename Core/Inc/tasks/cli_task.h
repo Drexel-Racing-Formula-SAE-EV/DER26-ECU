@@ -9,8 +9,8 @@
 *
 */
 
-#ifndef __CLI_TASK_H_
-#define __CLI_TASK_H_
+#ifndef ECU_TASKS_CLI_TASK_H_
+#define ECU_TASKS_CLI_TASK_H_
 
 #include "app.h"
 

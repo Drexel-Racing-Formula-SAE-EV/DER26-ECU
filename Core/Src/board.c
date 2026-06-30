@@ -14,6 +14,22 @@
 
 void board_init(board_t *dev)
 {
+	const mpu6050_config_t mpu6050_conf =
+	{
+		.addr_7bit = MPU6050_ADDR1,
+		.sample_rate_divisor = 0u,
+		.external_sync = EXT_SYNC_DISABLE,
+		.lowpass_filter = DLPF_260HZ_BW,
+		.gyro_scale = FS_SEL_250,
+		.acc_scale = AFS_SEL_2,
+		.clock = CLKSEL_INT_8MHZ
+	};
+
+	if(dev == NULL)
+	{
+		return;
+	}
+
 	stm32f767_init(&dev->stm32f767);
 
 	poten_init(&dev->apps1, APPS1_0, APPS1_100, &dev->stm32f767.hadc1);
@@ -30,15 +46,7 @@ void board_init(board_t *dev)
 	pwm_device_init(&dev->ssa, TIM3, &dev->stm32f767.htim3, 65535, &TIM3->CCR4, 4);
 	ams_init(&dev->ams);
 
-	mpu6050_config_t mpu6050_conf = {0};
-	mpu6050_conf.addr_7bit = MPU6050_ADDR1;
-	mpu6050_conf.sample_rate_divisor = 0;
-	mpu6050_conf.external_sync = EXT_SYNC_DISABLE;
-	mpu6050_conf.lowpass_filter = DLPF_260HZ_BW;
-	mpu6050_conf.gyro_scale = FS_SEL_250;
-	mpu6050_conf.acc_scale = AFS_SEL_2;
-	mpu6050_conf.clock = CLKSEL_INT_8MHZ;
-	mpu6050_init(&dev->mpu6050, &mpu6050_conf, &dev->stm32f767.hi2c2);
+	(void)mpu6050_init(&dev->mpu6050, &mpu6050_conf, &dev->stm32f767.hi2c2);
 
 	dashboard_init(&dev->dashboard, &dev->stm32f767.huart7);
 }

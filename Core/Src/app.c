@@ -14,7 +14,6 @@
 #include "tasks/bse_task.h"
 #include "tasks/rtd_task.h"
 #include "tasks/error_task.h"
-#include "tasks/bse_task.h"
 #include "tasks/bppc_task.h"
 #include "tasks/apps_task.h"
 #include "tasks/canbus_task.h"
@@ -26,7 +25,20 @@
 
 app_data_t app = {0};
 
-void app_create()
+static HAL_StatusTypeDef merge_hal_status(HAL_StatusTypeDef current, HAL_StatusTypeDef next)
+{
+	HAL_StatusTypeDef result = current;
+
+	if((result == HAL_OK) && (next != HAL_OK))
+	{
+		result = next;
+	}
+
+	return result;
+}
+
+
+void app_create(void)
 {
 	app.throttle = 0;
 	app.brake = 0;
@@ -63,10 +75,10 @@ void app_create()
 
 	app.brakelight = false;
 
-	app.coolant_pressure = 0.0;
-	app.coolant_flow = 0.0;
-	app.coolant_temp_in = 0.0;
-	app.coolant_temp_out = 0.0;
+	app.coolant_pressure = 0.0f;
+	app.coolant_flow = 0.0f;
+	app.coolant_temp_in = 0.0f;
+	app.coolant_temp_out = 0.0f;
 
 	app.throttle = 0;
 	app.brake = 0;
@@ -104,13 +116,14 @@ void app_create()
 
 }
 
-HAL_StatusTypeDef read_time(){
-	RTC_TimeTypeDef rTime;
-	RTC_DateTypeDef rDate;
-	HAL_StatusTypeDef ret = 0;
+HAL_StatusTypeDef read_time(void)
+{
+	RTC_TimeTypeDef rTime = {0};
+	RTC_DateTypeDef rDate = {0};
+	HAL_StatusTypeDef ret = HAL_OK;
 
-	ret |= HAL_RTC_GetTime(&app.board.stm32f767.hrtc, &rTime, RTC_FORMAT_BIN);
-	ret |= HAL_RTC_GetDate(&app.board.stm32f767.hrtc, &rDate, RTC_FORMAT_BIN);
+	ret = merge_hal_status(ret, HAL_RTC_GetTime(&app.board.stm32f767.hrtc, &rTime, RTC_FORMAT_BIN));
+	ret = merge_hal_status(ret, HAL_RTC_GetDate(&app.board.stm32f767.hrtc, &rDate, RTC_FORMAT_BIN));
 
 	app.datetime.second = rTime.Seconds;
 	app.datetime.minute = rTime.Minutes;
@@ -122,22 +135,23 @@ HAL_StatusTypeDef read_time(){
 	return ret;
 }
 
-HAL_StatusTypeDef write_time(){
-	RTC_TimeTypeDef rTime;
-	RTC_DateTypeDef rDate;
-	HAL_StatusTypeDef ret = 0;
+HAL_StatusTypeDef write_time(void)
+{
+	RTC_TimeTypeDef rTime = {0};
+	RTC_DateTypeDef rDate = {0};
+	HAL_StatusTypeDef ret = HAL_OK;
 	RTC_HandleTypeDef *rtc = &app.board.stm32f767.hrtc;
 
-	rTime.Seconds = HEX2DEC(app.datetime.second);
-	rTime.Minutes = HEX2DEC(app.datetime.minute);
-	rTime.Hours = HEX2DEC(app.datetime.hour);
-	rDate.Date = HEX2DEC(app.datetime.day);
-	rDate.Month = HEX2DEC(app.datetime.month);
-	rDate.Year = HEX2DEC(app.datetime.year);
+	rTime.Seconds = rtc_dec_to_bcd(app.datetime.second);
+	rTime.Minutes = rtc_dec_to_bcd(app.datetime.minute);
+	rTime.Hours = rtc_dec_to_bcd(app.datetime.hour);
+	rDate.Date = rtc_dec_to_bcd(app.datetime.day);
+	rDate.Month = rtc_dec_to_bcd(app.datetime.month);
+	rDate.Year = rtc_dec_to_bcd(app.datetime.year);
 	rDate.WeekDay = RTC_WEEKDAY_MONDAY;
 
-	ret |= HAL_RTC_SetTime(rtc, &rTime, RTC_FORMAT_BCD);
-	ret |= HAL_RTC_SetDate(rtc, &rDate, RTC_FORMAT_BCD);
+	ret = merge_hal_status(ret, HAL_RTC_SetTime(rtc, &rTime, RTC_FORMAT_BCD));
+	ret = merge_hal_status(ret, HAL_RTC_SetDate(rtc, &rDate, RTC_FORMAT_BCD));
 
 	return ret;
 }

@@ -5,8 +5,8 @@
  *      Author: cole
  */
 
-#ifndef __FLOW_SENSOR_H_
-#define __FLOW_SENSOR_H_
+#ifndef ECU_EXT_DRIVERS_FLOW_SENSOR_H_
+#define ECU_EXT_DRIVERS_FLOW_SENSOR_H_
 
 #include <stdint.h>
 #include "stm32f7xx_hal.h"
@@ -28,4 +28,4 @@ typedef struct
 void flow_sensor_init(flow_sensor_t *dev, uint32_t clock_freq, TIM_HandleTypeDef *htim, TIM_TypeDef *tim, HAL_TIM_ActiveChannel high_channel, HAL_TIM_ActiveChannel total_channel);
 int flow_sensor_read(flow_sensor_t *dev);
 
-#endif /* __FLOW_SENSOR_H_ */
+#endif /* ECU_EXT_DRIVERS_FLOW_SENSOR_H_ */

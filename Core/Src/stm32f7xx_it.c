@@ -256,17 +256,17 @@ void UART7_IRQHandler(void)
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart){
 	extern app_data_t app;
 	cli_t *cli = &app.board.cli;
-	char endl[] = "\r\n";
-	HAL_StatusTypeDef ret = 0;
+	static const uint8_t endl[] = "\r\n";
+	HAL_StatusTypeDef ret = HAL_OK;
 
-	if(cli->huart->Instance == huart->Instance)
+	if((huart != NULL) && (cli->huart != NULL) && (cli->huart->Instance == huart->Instance))
 	{
 		if(cli->c == '\r')
 		{
-			ret = HAL_UART_Transmit_IT(cli->huart, (uint8_t *)endl, strlen(endl));
+			ret = HAL_UART_Transmit_IT(cli->huart, (uint8_t *)endl, (uint16_t)(sizeof(endl) - 1u));
 			cli->line[cli->index] = '\0';
 			cli->index = 0;
-			if(strlen(cli->line) > 0)
+			if(cli->line[0] != '\0')
 			{
 				cli->msg_pending = true;
 				cli->msg_count++;
@@ -276,7 +276,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart){
 		{
 			// ignore \r
 		}
-		else if(cli->c == 127)
+		else if(cli->c == 127u)
 		{
 			uint8_t del = 127;
 			if(cli->index != 0)
@@ -288,9 +288,9 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart){
 				ret = HAL_UART_Transmit_IT(cli->huart, &del, 1);
 			}
 		}
-		else if(cli->c >= 32 && cli->c <= 126)
+		else if((cli->c >= 32u) && (cli->c <= 126u))
 		{
-			if(cli->index != CLI_LINESZ - 1)
+			if(cli->index != (CLI_LINESZ - 1u))
 			{
 				cli->line[cli->index++] = cli->c;
 				ret = HAL_UART_Transmit_IT(cli->huart, &cli->c, 1);

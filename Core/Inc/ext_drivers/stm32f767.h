@@ -9,8 +9,8 @@
 *
 */
 
-#ifndef __STM32F767_H_
-#define __STM32F767_H_
+#ifndef ECU_EXT_DRIVERS_STM32F767_H_
+#define ECU_EXT_DRIVERS_STM32F767_H_
 
 #include <stdint.h>
 #include "stm32f7xx_hal.h"

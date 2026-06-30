@@ -9,8 +9,8 @@
 *
 */
 
-#ifndef __RTD_TASK_H_
-#define __RTD_TASK_H_
+#ifndef ECU_TASKS_RTD_TASK_H_
+#define ECU_TASKS_RTD_TASK_H_
 
 #include "app.h"
 

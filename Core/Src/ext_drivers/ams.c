@@ -31,12 +31,12 @@ void segment_init(segment_t *dev)
         return;
     }
 
-    for(int i = 0; i < NVOLTS; i++)
+    for(uint16_t i = 0u; i < NVOLTS; i++)
     {
         dev->volts[i] = 0u;
     }
 
-    for(int i = 0; i < NTEMPS; i++)
+    for(uint16_t i = 0u; i < NTEMPS; i++)
     {
         dev->temps[i] = 0u;
     }
@@ -51,7 +51,7 @@ void ams_init(ams_t *dev)
 
     memset(dev, 0, sizeof(*dev));
 
-    for(int i = 0; i < NSEGS; i++)
+    for(uint16_t i = 0u; i < NSEGS; i++)
     {
         segment_init(&dev->segs[i]);
     }

@@ -19,7 +19,7 @@
  *
  * @param arg App_data struct pointer converted to void pointer
  */
-void canbus_task_fn(void *arg);
+static void canbus_task_fn(void *arg);
 
 TaskHandle_t canbus_task_start(app_data_t *data) {
     TaskHandle_t handle = NULL;
@@ -33,7 +33,7 @@ TaskHandle_t canbus_task_start(app_data_t *data) {
     return handle;
 }
 
-void canbus_task_fn(void *arg)
+static void canbus_task_fn(void *arg)
 {
     app_data_t *data = (app_data_t *)arg;
 

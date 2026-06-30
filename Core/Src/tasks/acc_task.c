@@ -17,7 +17,7 @@
  *
  * @param arg App_data struct pointer converted to void pointer
  */
-void acc_task_fn(void *arg);
+static void acc_task_fn(void *arg);
 
 TaskHandle_t acc_task_start(app_data_t *data)
 {
@@ -32,7 +32,7 @@ TaskHandle_t acc_task_start(app_data_t *data)
     return handle;
 }
 
-void acc_task_fn(void *arg)
+static void acc_task_fn(void *arg)
 {
     app_data_t *data = (app_data_t *)arg;
     if(data == NULL)
@@ -41,7 +41,7 @@ void acc_task_fn(void *arg)
         return;
     }
     mpu6050_t *mpu6050 = &data->board.mpu6050;
-    int ret = 0;
+    HAL_StatusTypeDef ret = HAL_OK;
     uint32_t entry;
 
     for(;;)
@@ -49,7 +49,7 @@ void acc_task_fn(void *arg)
         entry = osKernelGetTickCount();
 
         ret = mpu6050_read(mpu6050);
-        if(ret) data->acc_fault = true;
+        if(ret != HAL_OK) data->acc_fault = true;
         else data->acc_fault = false;
 
         osDelayUntil(entry + (1000 / ACC_FREQ));

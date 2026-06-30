@@ -9,13 +9,13 @@
  * 
  */
 
-#ifndef __POTEN_H_
-#define __POTEN_H_
+#ifndef ECU_EXT_DRIVERS_POTEN_H_
+#define ECU_EXT_DRIVERS_POTEN_H_
 
 #include <stdint.h>
 #include "stm32f7xx_hal.h"
 
-#define HISTSZ 10
+#define HISTSZ 10u
 
 typedef struct {
 	uint16_t min;

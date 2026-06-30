@@ -35,6 +35,8 @@ jobs:
         run: bash ci/scripts/check_project_structure.sh
       - name: Check repo hygiene
         run: bash ci/scripts/check_repo_hygiene.sh
+      - name: Check ECU MISRA-lite hygiene
+        run: python3 ci/scripts/check_ecu_misra_hygiene.py
 
   host-tests:
     name: ECU host tests and analyzer
@@ -56,6 +58,9 @@ jobs:
         run: |
           make CC=gcc clean
           make CC=gcc unit | tee unit_test_output.txt
+      - name: Run ECU driver/utility tests
+        working-directory: host_tests
+        run: make CC=gcc drivers | tee driver_test_output.txt
       - name: Run ECU host regression tests
         working-directory: host_tests
         run: make CC=gcc test | tee host_test_output.txt
@@ -68,6 +73,8 @@ jobs:
         run: |
           echo "===== unit_test_output.txt ====="
           test -f unit_test_output.txt && cat unit_test_output.txt || true
+          echo "===== driver_test_output.txt ====="
+          test -f driver_test_output.txt && cat driver_test_output.txt || true
           echo "===== host_test_output.txt ====="
           test -f host_test_output.txt && cat host_test_output.txt || true
 

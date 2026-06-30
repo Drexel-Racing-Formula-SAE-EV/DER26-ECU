@@ -5,12 +5,12 @@
  *      Author: cole
  */
 
-#ifndef __DASHBOARD_H_
-#define __DASHBOARD_H_
+#ifndef ECU_EXT_DRIVERS_DASHBOARD_H_
+#define ECU_EXT_DRIVERS_DASHBOARD_H_
 
 #include "stm32f7xx_hal.h"
 
-#define DASH_LINESZ 64
+#define DASH_LINESZ 64u
 
 typedef struct
 {
@@ -20,6 +20,6 @@ typedef struct
 } dashboard_t;
 
 int dashboard_init(dashboard_t *dev, UART_HandleTypeDef *huart);
-HAL_StatusTypeDef dashboard_write(dashboard_t *dev, char *str);
+HAL_StatusTypeDef dashboard_write(dashboard_t *dev, const char *str);
 
 #endif /* INC_EXT_DRIVERS_DASHBOARD_H_ */

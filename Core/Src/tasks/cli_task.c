@@ -14,31 +14,32 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <errno.h>
 
 /**
 * @brief Actual CLI task function
 *
 * @param arg App_data struct pointer converted to void pointer
 */
-void cli_task_fn(void *arg);
-int cli_handle_cmd(int argc, char *argv[]);
-void cmd_not_found(int argc, char *argv[]);
+static void cli_task_fn(void *arg);
+static int cli_handle_cmd(int argc, char *argv[]);
+static void cmd_not_found(int argc, char *argv[]);
 
-int help(int argc, char *argv[]);
-int id(int argc, char *argv[]);
-int get_throttle(int argc, char *argv[]);
-int get_brakelight(int argc, char *argv[]);
-int get_brake(int argc, char *argv[]);
-int get_time(int argc, char *argv[]);
-int set_time(int argc, char *argv[]);
-int get_faults(int argc, char *argv[]);
-int ssa(int argc, char *argv[]);
-int sd(int argc, char *argv[]);
+static int help(int argc, char *argv[]);
+static int id(int argc, char *argv[]);
+static int get_throttle(int argc, char *argv[]);
+static int get_brakelight(int argc, char *argv[]);
+static int get_brake(int argc, char *argv[]);
+static int get_time(int argc, char *argv[]);
+static int set_time(int argc, char *argv[]);
+static int get_faults(int argc, char *argv[]);
+static int ssa(int argc, char *argv[]);
+static int sd(int argc, char *argv[]);
 
-char outline[CLI_LINESZ];
-app_data_t *data;
-cli_t *cli;
-command_t cmds[] =
+static char outline[CLI_LINESZ];
+static app_data_t *data;
+static cli_t *cli;
+static const command_t cmds[] =
 {
 	{"help", &help, "print help menu"},
 	{"id", &id, "identifies system"},
@@ -65,7 +66,7 @@ TaskHandle_t cli_task_start(app_data_t *data)
    return handle;
 }
 
-void cli_task_fn(void *arg)
+static void cli_task_fn(void *arg)
 {
     data = (app_data_t *)arg;
     if(data == NULL)
@@ -106,16 +107,23 @@ void cli_task_fn(void *arg)
 	}
 }
 
-int cli_handle_cmd(int argc, char *argv[])
+static int cli_handle_cmd(int argc, char *argv[])
 {
-	int i;
+	size_t i;
 	int ret = 0;
 	bool cmd_found = false;
-	int num_cmds = sizeof(cmds) / sizeof(command_t);
+	size_t num_cmds = sizeof(cmds) / sizeof(cmds[0]);
+
+	if((argc <= 0) || (argv == NULL) || (argv[0] == NULL))
+	{
+		cli_printline(cli, "No command entered");
+		cli->ret = 1;
+		return 1;
+	}
 
 	for(i = 0; i < num_cmds; i++)
 	{
-		if(!strncmp(cmds[i].name, argv[0], CLI_LINESZ))
+		if(strncmp(cmds[i].name, argv[0], CLI_LINESZ) == 0)
 		{
 			ret = cmds[i].func(argc, argv);
 			cli->msg_valid++;
@@ -128,20 +136,28 @@ int cli_handle_cmd(int argc, char *argv[])
 	return ret;
 }
 
-void cmd_not_found(int argc, char *argv[])
+static void cmd_not_found(int argc, char *argv[])
 {
-	snprintf(outline, CLI_LINESZ, "Command not found: \'%s\'", argv[0]);
+	const char *cmd = "<empty>";
+	(void)argc;
+
+	if((argv != NULL) && (argv[0] != NULL))
+	{
+		cmd = argv[0];
+	}
+
+	snprintf(outline, CLI_LINESZ, "Command not found: \'%s\'", cmd);
 	cli_printline(cli, outline);
 	cli_printline(cli, "Type 'help' for list of commands");
 }
 
-int help(int argc, char *argv[])
+static int help(int argc, char *argv[])
 {
-	int num_cmds;
-	int i;
+	size_t num_cmds;
+	size_t i;
 
 	cli_printline(cli, "---------- Help Menu ----------");
-	num_cmds = sizeof(cmds) / sizeof(command_t);
+	num_cmds = sizeof(cmds) / sizeof(cmds[0]);
 	for(i = 0; i < num_cmds; i++)
 	{
 		snprintf(outline, CLI_LINESZ, "%s - %s", cmds[i].name, cmds[i].desc);
@@ -150,35 +166,35 @@ int help(int argc, char *argv[])
 	return 0;
 }
 
-int id(int argc, char *argv[])
+static int id(int argc, char *argv[])
 {
     snprintf(outline, CLI_LINESZ, "DER ECU FW V%d.%d.%d", VER_MAJOR, VER_MINOR, VER_BUG);
 	cli_printline(cli, outline);
 	return 0;
 }
 
-int get_throttle(int argc, char *argv[])
+static int get_throttle(int argc, char *argv[])
 {
 	snprintf(outline, CLI_LINESZ, "throttle: %3d%%", data->throttle);
 	cli_printline(cli, outline);
 	return 0;
 }
 
-int get_brakelight(int argc, char *argv[])
+static int get_brakelight(int argc, char *argv[])
 {
 	snprintf(outline, CLI_LINESZ, "brakelight: %s", data->brakelight ? "ON" : "OFF");
 	cli_printline(cli, outline);
 	return 0;
 }
 
-int get_brake(int argc, char *argv[])
+static int get_brake(int argc, char *argv[])
 {
 	snprintf(outline, CLI_LINESZ, "brake: %3d%%", data->brake);
 	cli_printline(cli, outline);
 	return 0;
 }
 
-int get_time(int argc, char *argv[])
+static int get_time(int argc, char *argv[])
 {
 	read_time();
 	snprintf(outline, CLI_LINESZ, "RTC: %02d/%02d/%d-%02d:%02d:%02d",
@@ -192,7 +208,7 @@ int get_time(int argc, char *argv[])
 	return 0;
 }
 
-int set_time(int argc, char *argv[])
+static int set_time(int argc, char *argv[])
 {
 	int month, day, year, hour, minute, second;
 
@@ -237,7 +253,7 @@ int set_time(int argc, char *argv[])
 	return 0;
 }
 
-int get_faults(int argc, char *argv[])
+static int get_faults(int argc, char *argv[])
 {
 	cli_printline(cli, "System faults:");
 	snprintf(outline, CLI_LINESZ, "hard:   %d", data->hard_fault);
@@ -269,48 +285,67 @@ int get_faults(int argc, char *argv[])
 	return 0;
 }
 
-int ssa(int argc, char *argv[])
+static int ssa(int argc, char *argv[])
 {
-	int ret;
+	int ret = 0;
+
 	if(argc == 1)
 	{
-		snprintf(outline, CLI_LINESZ, "%d%%", (int)(TIM3->CCR4 * 100 / 65535));
+		snprintf(outline, CLI_LINESZ, "%d%%", (int)(TIM3->CCR4 * 100u / 65535u));
 		cli_printline(cli, outline);
 	}
 	else if(argc == 2)
 	{
-		int duty = atoi(argv[1]);
-		if(duty >= 0 && duty <= 100)
+		char *endptr = NULL;
+		long duty_long;
+
+		errno = 0;
+		duty_long = strtol(argv[1], &endptr, 10);
+
+		if((errno == 0) && (endptr != argv[1]) && (*endptr == '\0') && (duty_long >= 0L) && (duty_long <= 100L))
 		{
+			int duty = (int)duty_long;
 			snprintf(outline, CLI_LINESZ, "setting ssa to %d%%", duty);
 			cli_printline(cli, outline);
 			set_ssa(duty);
-			ret = 0;
 		}
 		else
 		{
 			cli_printline(cli, "ERROR: ssa duty must be 0<= Duty <= 100");
-			return 1;
+			ret = 1;
 		}
 	}
 	else
 	{
 		cli_printline(cli, "ERROR: too many arguments to ssa");
-		return 1;
+		ret = 1;
 	}
+
 	return ret;
 }
 
-int sd(int argc, char *argv[])
+static int sd(int argc, char *argv[])
 {
 	int ret = 0;
 	snprintf(outline, CLI_LINESZ, "bms fail:  %d", data->bms_fail);
-	ret |= cli_printline(cli, outline);
+	if(cli_printline(cli, outline) != 0)
+	{
+		ret = 1;
+	}
 	snprintf(outline, CLI_LINESZ, "imd fail:  %d", data->imd_fail);
-	ret |= cli_printline(cli, outline);
+	if(cli_printline(cli, outline) != 0)
+	{
+		ret = 1;
+	}
 	snprintf(outline, CLI_LINESZ, "bspd fail: %d", data->bspd_fail);
-	ret |= cli_printline(cli, outline);
+	if(cli_printline(cli, outline) != 0)
+	{
+		ret = 1;
+	}
 	snprintf(outline, CLI_LINESZ, "fw fail:   %d", !data->fw_state);
-	ret |= cli_printline(cli, outline);
+	if(cli_printline(cli, outline) != 0)
+	{
+		ret = 1;
+	}
 	return ret;
 }

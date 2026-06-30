@@ -9,16 +9,16 @@
  * 
  */
 
-#ifndef __CLI_H_
-#define __CLI_H_
+#ifndef ECU_EXT_DRIVERS_CLI_H_
+#define ECU_EXT_DRIVERS_CLI_H_
 
 #include <stdint.h>
 #include <stdbool.h>
 
 #include "stm32f7xx_hal.h"
 
-#define CLI_LINESZ 256
-#define MAXTOKS (CLI_LINESZ / 2)
+#define CLI_LINESZ 256u
+#define MAXTOKS (CLI_LINESZ / 2u)
 
 typedef struct {
     uint8_t c;
@@ -33,13 +33,13 @@ typedef struct {
 } cli_t;
 
 typedef struct {
-    char *name;
+    const char *name;
     int (*func)(int argc, char *argv[]);
-    char *desc;
+    const char *desc;
 } command_t;
 
 void cli_device_init(cli_t *dev, UART_HandleTypeDef *huart);
-int cli_printline(cli_t *dev, char *line);
-int tokenize(char *s, char *toks[], int maktoks, char *delim);
+int cli_printline(cli_t *dev, const char *line);
+int tokenize(char *s, char *toks[], int maxtoks, const char *delim);
 
 #endif

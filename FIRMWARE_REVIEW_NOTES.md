@@ -52,6 +52,25 @@ Review focus: logic errors, undefined behavior, unsafe concurrency, parser bound
 10. **Task creation cleanup**
     - Task handles are assigned before assertion checks, so release builds with `NDEBUG` cannot compile out task creation side effects.
 
+11. **MISRA baseline Rev 2 cleanup**
+    - Added null guards to first-party driver initialization and write/read helper paths.
+    - Removed `strtok()` from CLI tokenization and kept bounded token-limit behavior.
+    - Removed remaining first-party `strlen()` use from ISR-adjacent UART callback logic.
+    - Converted `map()` away from `long double` arithmetic.
+    - Added unsigned suffixes to first-party integer macros.
+    - Made STM32 mutex attributes file-local `static const`.
+    - Initialized RTC local structs before HAL use.
+
+12. **MISRA logic/detail clean pass**
+    - `tokenize()` now uses the caller-provided token capacity instead of silently reserving one unused slot.
+    - CLI command dispatch now handles empty/whitespace-only commands without dereferencing `argv[0]`.
+    - PWM initialization now rejects invalid channels and propagates `HAL_TIM_PWM_Start` failure.
+    - Flow sensor initialization records timer start failures, and impossible high-count > total-count captures are clamped before duty calculation.
+    - CAN transmit now rejects IDs outside the standard 11-bit range used by this driver.
+    - MPU6050 config validation now covers all enum fields, and reads reject invalid zero scale divisors.
+    - `REG_USR_CTRL` was renamed to `REG_PWR_MGMT_1` to match the actual register address being written.
+    - `ntc_init()` now has a null guard.
+
 ## Items intentionally not changed
 
 - Fault policy in `error_task.c` was not changed because hard/soft fault behavior may be a team/rules design choice.
@@ -73,6 +92,8 @@ Result:
 
 ```text
 ALL ECU UNIT TESTS PASSED
+ALL ECU UNIT TESTS PASSED
+ALL ECU DRIVER TESTS PASSED
 ALL ECU HOST TESTS PASSED
-GCC analyzer passed on host-testable ECU parser code
+GCC analyzer passed on host-testable ECU parser and driver code
 ```

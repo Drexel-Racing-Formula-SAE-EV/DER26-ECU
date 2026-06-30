@@ -14,35 +14,35 @@
 #include "ext_drivers/canbus.h"
 #include <assert.h>
 
-const osMutexAttr_t can1_mutex_attr = {
+static const osMutexAttr_t can1_mutex_attr = {
 	.name = "CAN Bus Mutex",
 	.attr_bits = osMutexPrioInherit | osMutexRecursive,
 	.cb_mem = NULL,
 	.cb_size = 0UL,
 };
 
-const osMutexAttr_t i2c2_mutex_attr = {
+static const osMutexAttr_t i2c2_mutex_attr = {
 	.name = "MPU6050 Mutex",
 	.attr_bits = osMutexPrioInherit | osMutexRecursive,
 	.cb_mem = NULL,
 	.cb_size = 0UL,
 };
 
-const osMutexAttr_t spi6_mutex_attr = {
+static const osMutexAttr_t spi6_mutex_attr = {
 	.name = "SD Card Mutex",
 	.attr_bits = osMutexPrioInherit | osMutexRecursive,
 	.cb_mem = NULL,
 	.cb_size = 0UL,
 };
 
-const osMutexAttr_t uart3_mutex_attr = {
+static const osMutexAttr_t uart3_mutex_attr = {
 	.name = "CLI Mutex",
 	.attr_bits = osMutexPrioInherit | osMutexRecursive,
 	.cb_mem = NULL,
 	.cb_size = 0UL,
 };
 
-const osMutexAttr_t uart7_mutex_attr = {
+static const osMutexAttr_t uart7_mutex_attr = {
 	.name = "Dashboard Mutex",
 	.attr_bits = osMutexPrioInherit | osMutexRecursive,
 	.cb_mem = NULL,
@@ -51,6 +51,11 @@ const osMutexAttr_t uart7_mutex_attr = {
 
 void stm32f767_init(stm32f767_t *dev)
 {
+	if(dev == NULL)
+	{
+		return;
+	}
+
 	extern ADC_HandleTypeDef hadc1;
 	extern ADC_HandleTypeDef hadc2;
 	extern ADC_HandleTypeDef hadc3;
@@ -130,6 +135,7 @@ HAL_StatusTypeDef stm32f767_adc_switch_channel(ADC_HandleTypeDef *hadc, uint32_t
 	}
 
 	ADC_ChannelConfTypeDef sConfig = {0};
+
 	sConfig.Channel = channel;
 	sConfig.Rank = ADC_REGULAR_RANK_1;
 	sConfig.SamplingTime = ADC_SAMPLETIME_3CYCLES;

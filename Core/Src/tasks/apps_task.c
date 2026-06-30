@@ -16,15 +16,22 @@
 #include "tasks/apps_task.h"
 #include "ext_drivers/canbus.h"
 
-#define TO_LSB(x) ((uint8_t)((x) & 0xffu))
-#define TO_MSB(x) ((uint8_t)(((x) >> 8u) & 0xffu))
+static inline uint8_t u16_lsb(uint16_t value)
+{
+	return (uint8_t)(value & 0x00ffu);
+}
+
+static inline uint8_t u16_msb(uint16_t value)
+{
+	return (uint8_t)((value >> 8u) & 0x00ffu);
+}
 
 /**
  * @brief Actual APPS task function
  *
  * @param arg App_data struct pointer converted to void pointer
  */
-void apps_task_fn(void *arg);
+static void apps_task_fn(void *arg);
 
 TaskHandle_t apps_task_start(app_data_t *data)
 {
@@ -39,7 +46,7 @@ TaskHandle_t apps_task_start(app_data_t *data)
     return handle;
 }
 
-void apps_task_fn(void *arg)
+static void apps_task_fn(void *arg)
 {
     app_data_t *data = (app_data_t *)arg;
     if(data == NULL)
@@ -77,7 +84,7 @@ void apps_task_fn(void *arg)
         apps1->percent = poten_get_percent(apps1);
         apps2->percent = poten_get_percent(apps2);
 
-        throttle_raw = 100 - ((apps1->percent + apps2->percent) / 2);
+        throttle_raw = 100.0f - ((apps1->percent + apps2->percent) / 2.0f);
 //        throttle_raw = 100 - apps2->percent;
         if(throttle_raw < 0){
         	throttle_raw = 0;
@@ -126,9 +133,9 @@ void apps_task_fn(void *arg)
         }
         else
         {
-            throttle_hex = (uint16_t)(data->throttle * MAXTRQ / 10.0); // CM CANBus Protocol
-            tx_packet.data[0] = TO_LSB(throttle_hex);
-            tx_packet.data[1] = TO_MSB(throttle_hex);
+            throttle_hex = (uint16_t)((float)(data->throttle * MAXTRQ) / 10.0f); // CM CANBus Protocol
+            tx_packet.data[0] = u16_lsb(throttle_hex);
+            tx_packet.data[1] = u16_msb(throttle_hex);
             tx_packet.data[2] = 0;
             tx_packet.data[3] = 0;
             tx_packet.data[4] = 1; // Direction: 0-backward, 1-forward (motor is mounted backwards

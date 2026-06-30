@@ -12,13 +12,13 @@
 #include "tasks/rtd_task.h"
 #include "main.h"
 
-#define TRIP_DELAY 100
+#define TRIP_DELAY 100u
 /**
 * @brief Actual RTD task function
 *
 * @param arg App_data struct pointer converted to void pointer
 */
-void rtd_task_fn(void *arg);
+static void rtd_task_fn(void *arg);
 
 TaskHandle_t rtd_task_start(app_data_t *data)
 {
@@ -33,7 +33,7 @@ TaskHandle_t rtd_task_start(app_data_t *data)
    return handle;
 }
 
-void rtd_task_fn(void *arg)
+static void rtd_task_fn(void *arg)
 {
     app_data_t *data = (app_data_t *)arg;
     if(data == NULL)

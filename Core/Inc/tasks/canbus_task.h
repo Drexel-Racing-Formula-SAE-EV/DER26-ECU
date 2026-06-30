@@ -9,8 +9,8 @@
  * 
  */
 
-#ifndef __CANBUS_TASK_H_
-#define __CANBUS_TASK_H_
+#ifndef ECU_TASKS_CANBUS_TASK_H_
+#define ECU_TASKS_CANBUS_TASK_H_
 
 #include "app.h"
 

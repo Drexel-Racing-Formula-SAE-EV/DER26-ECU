@@ -5,8 +5,8 @@
  *      Author: cole
  */
 
-#ifndef __NTC_H_
-#define __NTC_H_
+#ifndef ECU_EXT_DRIVERS_NTC_H_
+#define ECU_EXT_DRIVERS_NTC_H_
 
 #include <stdint.h>
 #include "stm32f7xx_hal.h"
@@ -21,4 +21,4 @@ typedef struct
 
 void ntc_init(ntc_t *dev, ADC_HandleTypeDef *hadc, uint32_t channel);
 
-#endif /* __NTC_H_ */
+#endif /* ECU_EXT_DRIVERS_NTC_H_ */

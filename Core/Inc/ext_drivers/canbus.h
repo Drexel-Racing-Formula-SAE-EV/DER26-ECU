@@ -9,13 +9,13 @@
  * 
  */
 
-#ifndef __CANBUS_H_
-#define __CANBUS_H_
+#ifndef ECU_EXT_DRIVERS_CANBUS_H_
+#define ECU_EXT_DRIVERS_CANBUS_H_
 
 #include "cmsis_os.h"
 #include "stm32f7xx_hal.h"
 
-#define DATALEN 8
+#define DATALEN 8u
 #define CANBUS_TX_TIMEOUT_MS 10u
 
 typedef struct {

@@ -41,6 +41,11 @@ HAL_StatusTypeDef canbus_transmit(canbus_t *dev, const canbus_packet_t *packet, 
         return HAL_ERROR;
     }
 
+    if(packet->id > 0x7FFu)
+    {
+        return HAL_ERROR;
+    }
+
     start = HAL_GetTick();
     while(HAL_CAN_GetTxMailboxesFreeLevel(dev->hcan) == 0u)
     {

@@ -9,8 +9,8 @@
 *
 */
 
-#ifndef __BPPC_TASK_H_
-#define __BPPC_TASK_H_
+#ifndef ECU_TASKS_BPPC_TASK_H_
+#define ECU_TASKS_BPPC_TASK_H_
 
 #include "app.h"
 

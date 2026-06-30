@@ -5,22 +5,22 @@
  *      Author: Cole Bardin & Azmain Yousuf
  */
 
-#ifndef ___MPU6050_H_
-#define ___MPU6050_H_
+#ifndef ECU_EXT_DRIVERS_MPU6050_H_
+#define ECU_EXT_DRIVERS_MPU6050_H_
 
 #include "stm32f7xx_hal.h"
 
-#define MPU6050_ADDR0 0x68
-#define MPU6050_ADDR1 0x69
+#define MPU6050_ADDR0 0x68u
+#define MPU6050_ADDR1 0x69u
 
-#define REG_CONFIG 0x1A
-#define REG_SMPLRT_DIV 0x19
-#define REG_CONFIG_GYRO 27
-#define REG_CONFIG_ACC 28
-#define REG_USR_CTRL 107
-#define REG_DATA 59
-#define ACCEL_XOUT_H 0x3B
-#define GYRO_XOUT_H_REG 0x43
+#define REG_CONFIG 0x1Au
+#define REG_SMPLRT_DIV 0x19u
+#define REG_CONFIG_GYRO 27u
+#define REG_CONFIG_ACC 28u
+#define REG_PWR_MGMT_1 107u
+#define REG_DATA 59u
+#define ACCEL_XOUT_H 0x3Bu
+#define GYRO_XOUT_H_REG 0x43u
 
 typedef enum
 {
@@ -99,8 +99,8 @@ typedef struct
 	HAL_StatusTypeDef error;
 } mpu6050_t;
 
-int mpu6050_init(mpu6050_t *dev, mpu6050_config_t *conf, I2C_HandleTypeDef *hi2c);
+HAL_StatusTypeDef mpu6050_init(mpu6050_t *dev, const mpu6050_config_t *conf, I2C_HandleTypeDef *hi2c);
 
-int mpu6050_read(mpu6050_t *dev);
+HAL_StatusTypeDef mpu6050_read(mpu6050_t *dev);
 
 #endif

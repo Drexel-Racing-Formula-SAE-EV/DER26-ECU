@@ -5,8 +5,8 @@
  *      Author: Cole Bardin
  */
 
-#ifndef __PWM_H_
-#define __PWM_H_
+#ifndef ECU_EXT_DRIVERS_PWM_H_
+#define ECU_EXT_DRIVERS_PWM_H_
 
 #include <stdint.h>
 #include "stm32f7xx_hal.h"
@@ -24,4 +24,4 @@ typedef struct
 int pwm_device_init(pwm_t *dev, TIM_TypeDef *timer, TIM_HandleTypeDef *htim, uint64_t max_timer_val, volatile uint32_t *CCR, int channel);
 int pwm_set_percent(pwm_t *dev, float percent);
 
-#endif /* __PWM_H_ */
+#endif /* ECU_EXT_DRIVERS_PWM_H_ */

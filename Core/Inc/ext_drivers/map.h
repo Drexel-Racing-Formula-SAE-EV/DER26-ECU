@@ -9,9 +9,9 @@
 *
 */
 
-#ifndef __MAP_H_
-#define __MAP_H_
+#ifndef ECU_EXT_DRIVERS_MAP_H_
+#define ECU_EXT_DRIVERS_MAP_H_
 
-long double map(long x, long in_min, long in_max, long out_min, long out_max);
+float map(long x, long in_min, long in_max, long out_min, long out_max);
 
 #endif

@@ -9,8 +9,8 @@
  * 
  */
 
-#ifndef __APPS_TASK_H_
-#define __APPS_TASK_H_
+#ifndef ECU_TASKS_APPS_TASK_H_
+#define ECU_TASKS_APPS_TASK_H_
 
 #include "app.h"
 

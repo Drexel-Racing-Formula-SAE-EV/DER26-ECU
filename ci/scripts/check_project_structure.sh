@@ -13,6 +13,7 @@ required_paths=(
   "Drivers/STM32F7xx_HAL_Driver"
   "Middlewares/Third_Party/FreeRTOS"
   "STM32F767ZITX_FLASH.ld"
+  "ci/scripts/check_ecu_misra_hygiene.py"
   "host_tests/Makefile"
 )
 

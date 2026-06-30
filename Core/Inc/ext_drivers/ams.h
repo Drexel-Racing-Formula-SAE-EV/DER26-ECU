@@ -5,16 +5,16 @@
  *      Author: cole
  */
 
-#ifndef __AMS_H_
-#define __AMS_H_
+#ifndef ECU_EXT_DRIVERS_AMS_H_
+#define ECU_EXT_DRIVERS_AMS_H_
 
 #include <stdbool.h>
 #include <stdint.h>
 
-#define NSEGS 5
-#define NFANS 10
-#define NVOLTS 15
-#define NTEMPS 17
+#define NSEGS 5u
+#define NFANS 10u
+#define NVOLTS 15u
+#define NTEMPS 17u
 
 #define AMS_TELEM_CANBUS_ID 0x69u
 #define AMS_ESTIMATOR_CANBUS_ID 0x421u
@@ -73,4 +73,4 @@ bool ams_parse_can_frame(ams_t *dev, uint32_t std_id, bool is_standard, uint8_t 
 void ams_update_stale(ams_t *dev, uint32_t now_ms);
 
 
-#endif /* __AMS_H_ */
+#endif /* ECU_EXT_DRIVERS_AMS_H_ */

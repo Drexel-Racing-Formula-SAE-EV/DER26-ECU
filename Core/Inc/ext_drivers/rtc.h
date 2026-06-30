@@ -9,15 +9,22 @@
  * 
  */
 
-#ifndef __RTC_H_
-#define __RTC_H_
+#ifndef ECU_EXT_DRIVERS_RTC_H_
+#define ECU_EXT_DRIVERS_RTC_H_
 
 #include <stdint.h>
 #include <stm32f7xx_hal.h>
 #include <stm32f7xx_hal_rtc.h>
 
-#define DEC2HEX(x) (10*(x / 16) + (x - 10*(x / 16)))
-#define HEX2DEC(x) (16*(x / 10) + (x % 10))
+static inline uint16_t rtc_bcd_to_dec(uint16_t value)
+{
+	return (uint16_t)((10u * (value / 16u)) + (value % 16u));
+}
+
+static inline uint16_t rtc_dec_to_bcd(uint16_t value)
+{
+	return (uint16_t)((16u * (value / 10u)) + (value % 10u));
+}
 
 typedef struct {
 	uint16_t year;

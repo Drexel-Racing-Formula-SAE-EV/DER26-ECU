@@ -14,44 +14,110 @@
 
 #include "ext_drivers/cli.h"
 
-void cli_device_init(cli_t *dev, UART_HandleTypeDef *huart)
+static HAL_StatusTypeDef merge_hal_status(HAL_StatusTypeDef current, HAL_StatusTypeDef next)
 {
-    dev->huart = huart;
-    dev->index = 0;
-    dev->msg_pending = false;
-    dev->msg_count = 0;
-    dev->msg_proc = 0;
-    dev->msg_valid = 0;
-    dev->ret = 0;
+	HAL_StatusTypeDef result = current;
+
+	if((result == HAL_OK) && (next != HAL_OK))
+	{
+		result = next;
+	}
+
+	return result;
 }
 
-int cli_printline(cli_t *dev, char *line)
+static uint16_t cli_strlen_u16(const char *str)
 {
-	static char nl[] = "\r\n";
-	HAL_StatusTypeDef ret = 0;
+	uint16_t len = 0u;
+
+	if(str == NULL)
+	{
+		return 0u;
+	}
+
+	while((str[len] != '\0') && (len < UINT16_MAX))
+	{
+		len++;
+	}
+
+	return len;
+}
+
+
+void cli_device_init(cli_t *dev, UART_HandleTypeDef *huart)
+{
+	if(dev == NULL)
+	{
+		return;
+	}
+
+	dev->huart = huart;
+	dev->index = 0u;
+	dev->msg_pending = false;
+	dev->msg_count = 0u;
+	dev->msg_proc = 0u;
+	dev->msg_valid = 0u;
+	dev->ret = HAL_OK;
+	memset(dev->line, 0, sizeof(dev->line));
+}
+
+int cli_printline(cli_t *dev, const char *line)
+{
+	static const char nl[] = "\r\n";
+	HAL_StatusTypeDef ret = HAL_OK;
+
+	if((dev == NULL) || (dev->huart == NULL) || (line == NULL))
+	{
+		return (int)HAL_ERROR;
+	}
 
 	if(xPortIsInsideInterrupt())
 	{
-		ret |= HAL_UART_Transmit_IT(dev->huart, (uint8_t *)line, strlen(line));
-		ret |= HAL_UART_Transmit_IT(dev->huart, (uint8_t*)nl, strlen(nl));
+		ret = merge_hal_status(ret, HAL_UART_Transmit_IT(dev->huart, (uint8_t *)line, cli_strlen_u16(line)));
+		ret = merge_hal_status(ret, HAL_UART_Transmit_IT(dev->huart, (uint8_t *)nl, cli_strlen_u16(nl)));
 	}
 	else
 	{
-		ret |= HAL_UART_Transmit(dev->huart, (uint8_t *)line, strlen(line), 100);
-		ret |= HAL_UART_Transmit(dev->huart, (uint8_t *)nl, strlen(nl), 100);
+		ret = merge_hal_status(ret, HAL_UART_Transmit(dev->huart, (uint8_t *)line, cli_strlen_u16(line), 100u));
+		ret = merge_hal_status(ret, HAL_UART_Transmit(dev->huart, (uint8_t *)nl, cli_strlen_u16(nl), 100u));
 	}
-	return ret;
+	return (int)ret;
 }
 
-int tokenize(char *s, char *toks[], int maxtoks, char *delim)
+int tokenize(char *s, char *toks[], int maxtoks, const char *delim)
 {
-	int i = 0;
+	int count = 0;
+	char *cursor;
 
-	toks[i] = (char *)strtok(s, delim);
-	while(toks[i++] != NULL)
+	if((s == NULL) || (toks == NULL) || (delim == NULL) || (maxtoks <= 0))
 	{
-		if(i >= maxtoks - 1) toks[i] = NULL;
-		else toks[i] = (char *)strtok(NULL, delim);
+		return 0;
 	}
-	return i - 1;
+
+	for(int i = 0; i < maxtoks; i++)
+	{
+		toks[i] = NULL;
+	}
+
+	cursor = s;
+	while((*cursor != '\0') && (count < maxtoks))
+	{
+		cursor += strspn(cursor, delim);
+		if(*cursor == '\0')
+		{
+			break;
+		}
+
+		toks[count] = cursor;
+		count++;
+
+		cursor += strcspn(cursor, delim);
+		if(*cursor != '\0')
+		{
+			*cursor = '\0';
+			cursor++;
+		}
+	}
+
+	return count;
 }

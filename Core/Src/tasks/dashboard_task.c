@@ -15,12 +15,24 @@
 
 #define NEWLINE "\r\n"
 
+static HAL_StatusTypeDef merge_hal_status(HAL_StatusTypeDef current, HAL_StatusTypeDef next)
+{
+	HAL_StatusTypeDef result = current;
+
+	if((result == HAL_OK) && (next != HAL_OK))
+	{
+		result = next;
+	}
+
+	return result;
+}
+
 /**
 * @brief Actual Dashboard task function
 *
 * @param arg App_data struct pointer converted to void pointer
 */
-void dashboard_task_fn(void *arg);
+static void dashboard_task_fn(void *arg);
 
 TaskHandle_t dashboard_task_start(app_data_t *data)
 {
@@ -35,7 +47,7 @@ TaskHandle_t dashboard_task_start(app_data_t *data)
    return handle;
 }
 
-void dashboard_task_fn(void *arg)
+static void dashboard_task_fn(void *arg)
 {
     app_data_t *data = (app_data_t *)arg;
     if(data == NULL)
@@ -53,17 +65,17 @@ void dashboard_task_fn(void *arg)
 		
 		ret = HAL_OK;
 		snprintf(dash->line, DASH_LINESZ, "throttle %d" NEWLINE, data->throttle);
-		ret |= dashboard_write(dash, dash->line);
+		ret = merge_hal_status(ret, dashboard_write(dash, dash->line));
 		snprintf(dash->line, DASH_LINESZ, "brake %d" NEWLINE, data->brake);
-		ret |= dashboard_write(dash, dash->line);
+		ret = merge_hal_status(ret, dashboard_write(dash, dash->line));
 		snprintf(dash->line, DASH_LINESZ, "rtd %d" NEWLINE, data->rtd_mode);
-		ret |= dashboard_write(dash, dash->line);
+		ret = merge_hal_status(ret, dashboard_write(dash, dash->line));
 		snprintf(dash->line, DASH_LINESZ, "bms_fail %d" NEWLINE, data->bms_fail);
-		ret |= dashboard_write(dash, dash->line);
+		ret = merge_hal_status(ret, dashboard_write(dash, dash->line));
 		snprintf(dash->line, DASH_LINESZ, "imd_fail %d" NEWLINE, data->imd_fail);
-		ret |= dashboard_write(dash, dash->line);
+		ret = merge_hal_status(ret, dashboard_write(dash, dash->line));
 		snprintf(dash->line, DASH_LINESZ, "ecu_fault %d" NEWLINE, data->hard_fault);
-		ret |= dashboard_write(dash, dash->line);
+		ret = merge_hal_status(ret, dashboard_write(dash, dash->line));
 		// TODO: add rest of metrics after testing
 		data->dashboard_fault = (ret != HAL_OK);
 

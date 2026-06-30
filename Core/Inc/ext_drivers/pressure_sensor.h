@@ -9,8 +9,8 @@
 *
 */
 
-#ifndef __PRESSURE_SENSOR_H_
-#define __PRESSURE_SENSOR_H_
+#ifndef ECU_EXT_DRIVERS_PRESSURE_SENSOR_H_
+#define ECU_EXT_DRIVERS_PRESSURE_SENSOR_H_
 
 #include <stdint.h>
 

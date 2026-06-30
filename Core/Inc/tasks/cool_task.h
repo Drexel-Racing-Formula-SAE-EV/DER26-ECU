@@ -9,8 +9,8 @@
 *
 */
 
-#ifndef __COOL_TASK_H_
-#define __COOL_TASK_H_
+#ifndef ECU_TASKS_COOL_TASK_H_
+#define ECU_TASKS_COOL_TASK_H_
 
 #include "app.h"
 
