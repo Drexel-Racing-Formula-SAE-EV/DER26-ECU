@@ -21,6 +21,13 @@ const osMutexAttr_t can1_mutex_attr = {
 	.cb_size = 0UL,
 };
 
+const osMutexAttr_t adc3_mutex_attr = {
+	.name = "ADC3 Mutex",
+	.attr_bits = osMutexPrioInherit | osMutexRecursive,
+	.cb_mem = NULL,
+	.cb_size = 0UL,
+};
+
 const osMutexAttr_t i2c2_mutex_attr = {
 	.name = "MPU6050 Mutex",
 	.attr_bits = osMutexPrioInherit | osMutexRecursive,
@@ -85,6 +92,9 @@ void stm32f767_init(stm32f767_t *dev)
 
 	dev->can1_mutex = osMutexNew(&can1_mutex_attr);
 	assert(dev->can1_mutex);
+
+	dev->adc3_mutex = osMutexNew(&adc3_mutex_attr);
+	assert(dev->adc3_mutex);
 
 	dev->i2c2_mutex = osMutexNew(&i2c2_mutex_attr);
 	assert(dev->i2c2_mutex);

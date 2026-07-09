@@ -13,6 +13,7 @@
 #include "main.h"
 
 #define BV2000_350_PPL 750
+#define ADC3_MUTEX_TIMEOUT_MS 10u
 
 /**
 * @brief Actual COOL task function
@@ -22,11 +23,11 @@
 void cool_task_fn(void *arg);
 
 bool check_coolant_fault(app_data_t *data);
-// Temp sensors: SEN-04-5
+/* Temp sensors: SEN-04-5 */
 float SEN_04_5_convert(uint16_t count);
-// Flow sensor: BV2000TRN350B
+/* Flow sensor: BV2000TRN350B */
 float BV2000_350_convert(float freq);
-// Pressure sensor: Walfront 100PSI pressure transducer 1/8" NPT
+/* Pressure sensor: Walfront 100PSI pressure transducer 1/8" NPT */
 float walfront_pressure_convert(float voltage);
 
 TaskHandle_t cool_task_start(app_data_t *data)
@@ -38,7 +39,7 @@ TaskHandle_t cool_task_start(app_data_t *data)
        return NULL;
    }
 
-   xTaskCreate(cool_task_fn, "COOL task", 128, (void *)data, COOL_PRIO, &handle);
+   xTaskCreate(cool_task_fn, "COOL task", 256, (void *)data, COOL_PRIO, &handle);
    return handle;
 }
 
@@ -59,63 +60,79 @@ void cool_task_fn(void *arg)
 
     uint32_t entry;
 
-	for(;;)
-	{
-		entry = osKernelGetTickCount();
+    for(;;)
+    {
+        entry = osKernelGetTickCount();
 
-		// TODO: Finish calibrating coolant sensors
-		stm32f767_adc_switch_channel(press->handle, press->channel);
-		press->count = stm32f767_adc_read(press->handle);
-		press->percent = pressure_sensor_get_percent(press);
-		press_voltage = press->count * 3.3 / 4095.0 * 3.0 / 2.0;
-		data->coolant_pressure = walfront_pressure_convert(press_voltage);
+        /* TODO: Finish calibrating coolant sensors. ADC3 is shared with brake sensors, so this block is mutexed. */
+        if(osMutexAcquire(data->board.stm32f767.adc3_mutex, ADC3_MUTEX_TIMEOUT_MS) == osOK)
+        {
+            stm32f767_adc_switch_channel(press->handle, press->channel);
+            press->count = stm32f767_adc_read(press->handle);
+            press->percent = pressure_sensor_get_percent(press);
+            press_voltage = press->count * 3.3f / 4095.0f * 3.0f / 2.0f;
+            data->coolant_pressure = walfront_pressure_convert(press_voltage);
 
-		data->coolant_flow = BV2000_350_convert(flow->freq);
+            stm32f767_adc_switch_channel(temp1->hadc, temp1->channel);
+            temp1->count = stm32f767_adc_read(temp1->hadc);
+            temp1->temp = SEN_04_5_convert(temp1->count);
+            data->coolant_temp_in = temp1->temp;
 
-		stm32f767_adc_switch_channel(temp1->hadc, temp1->channel);
-		temp1->count = stm32f767_adc_read(temp1->hadc);
-		temp1->temp = SEN_04_5_convert(temp1->count);
-		data->coolant_temp_in = temp1->temp;
+            stm32f767_adc_switch_channel(temp2->hadc, temp2->channel);
+            temp2->count = stm32f767_adc_read(temp2->hadc);
+            temp2->temp = SEN_04_5_convert(temp2->count);
+            data->coolant_temp_out = temp2->temp;
 
-		stm32f767_adc_switch_channel(temp2->hadc, temp2->channel);
-		temp2->count = stm32f767_adc_read(temp2->hadc);
-		temp2->temp = SEN_04_5_convert(temp2->count);
-		data->coolant_temp_out = temp2->temp;
+            osMutexRelease(data->board.stm32f767.adc3_mutex);
+        }
+        else
+        {
+            data->coolant_fault = true;
+        }
 
-		// TODO: determine pump speed requirements
-		pwm_set_percent(pump, 50);
+        data->coolant_flow = BV2000_350_convert(flow->freq);
 
-//		data->coolant_fault = check_coolant_fault(data);
+        /* TODO: determine pump speed requirements. */
+        pwm_set_percent(pump, 50);
 
-		osDelayUntil(entry + (1000 / COOL_FREQ));
-	}
+        /* data->coolant_fault = check_coolant_fault(data); */
+
+        osDelayUntil(entry + (1000 / COOL_FREQ));
+    }
 }
 
 bool check_coolant_fault(app_data_t *data)
 {
-	// TODO: Calibrate and check for faults
-	//if(data->coolant_flow < COOLANT_FLOW_MIN) return true;
-	return false;
+    /* TODO: Calibrate and check for faults. */
+    (void)data;
+    /* if(data->coolant_flow < COOLANT_FLOW_MIN) return true; */
+    return false;
 }
 
 float SEN_04_5_convert(uint16_t count)
 {
-	float voltage = (float)count * 3.3 / 4095.0;
-	voltage = voltage * 3.0 / 2.0;
+    float voltage = (float)count * 3.3f / 4095.0f;
+    voltage = voltage * 3.0f / 2.0f;
 
-	float temp = voltage; // TODO: replace with real conversion func
-	return temp;
+    float temp = voltage; /* TODO: replace with real conversion func. */
+    return temp;
 }
 
 float BV2000_350_convert(float freq)
 {
-	return freq * 60.0 / (float)BV2000_350_PPL; // Returns Liters per Minute
+    return freq * 60.0f / (float)BV2000_350_PPL; /* Returns Liters per Minute. */
 }
 
 float walfront_pressure_convert(float voltage)
 {
-	float press = 25.0 * (voltage - 0.5);
-	if(press < 0) return 0;
-	if(press > 100) return 100;
-	return press;
+    float press = 25.0f * (voltage - 0.5f);
+    if(press < 0.0f)
+    {
+        return 0.0f;
+    }
+    if(press > 100.0f)
+    {
+        return 100.0f;
+    }
+    return press;
 }

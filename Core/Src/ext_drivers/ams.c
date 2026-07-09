@@ -1,4 +1,3 @@
-
 /*
  * ams.c
  *
@@ -22,6 +21,23 @@ typedef struct
 static uint16_t u16_be(const uint8_t *data)
 {
     return (uint16_t)(((uint16_t)data[0] << 8u) | (uint16_t)data[1]);
+}
+
+static int16_t s16_be(const uint8_t *data)
+{
+    return (int16_t)u16_be(data);
+}
+
+static bool bit_is_set(uint8_t value, uint8_t bit)
+{
+    return ((value & (uint8_t)(1u << bit)) != 0u);
+}
+
+static void mark_rx(ams_t *dev, uint32_t now_ms)
+{
+    dev->last_rx_tick = now_ms;
+    dev->rx_count++;
+    dev->stale = false;
 }
 
 void segment_init(segment_t *dev)
@@ -193,9 +209,7 @@ bool ams_parse_telemetry_frame(ams_t *dev, const uint8_t *data, uint8_t dlc, uin
     }
 
     dev->last_packet_header = header;
-    dev->last_rx_tick = now_ms;
-    dev->rx_count++;
-    dev->stale = false;
+    mark_rx(dev, now_ms);
     return true;
 }
 
@@ -221,6 +235,144 @@ bool ams_parse_estimator_frame(ams_t *dev, const uint8_t *data, uint8_t dlc, uin
     return true;
 }
 
+static bool ams_parse_compact_status_frame(ams_t *dev, const uint8_t *data, uint8_t dlc, uint32_t now_ms)
+{
+    uint8_t sequence;
+    uint8_t expected;
+
+    if((dev == NULL) || (data == NULL) || (dlc != AMS_FRAME_DLC))
+    {
+        if(dev != NULL)
+        {
+            dev->bad_rx_count++;
+        }
+        return false;
+    }
+
+    sequence = data[1];
+    if(dev->compact_status_valid)
+    {
+        expected = (uint8_t)(dev->compact_sequence + 1u);
+        dev->compact_sequence_repeated = (sequence == dev->compact_sequence);
+        if(dev->compact_sequence_repeated || (sequence != expected))
+        {
+            dev->compact_sequence_error_count++;
+        }
+    }
+    else
+    {
+        dev->compact_sequence_repeated = false;
+    }
+
+    dev->compact_protocol_version = data[0];
+    dev->compact_sequence = sequence;
+    dev->compact_state = data[2];
+    dev->compact_status_flags = data[3];
+    dev->compact_fault_flags = data[4];
+    dev->voltage_fault_reason = data[5];
+    dev->temp_fault_reason = data[6];
+    dev->current_fault_reason = data[7];
+
+    dev->bms_ok = bit_is_set(data[3], 0u);
+    dev->bms_inhibited = bit_is_set(data[3], 1u);
+    dev->ams_hard_fault = bit_is_set(data[3], 2u);
+    dev->ams_soft_fault = bit_is_set(data[3], 3u);
+    dev->voltage_valid = bit_is_set(data[3], 4u);
+    dev->current_valid = bit_is_set(data[3], 5u);
+    dev->temp_valid = bit_is_set(data[3], 6u);
+    dev->ams_can_fault = bit_is_set(data[3], 7u);
+
+    dev->voltage_fault = bit_is_set(data[4], 0u);
+    dev->temp_fault = bit_is_set(data[4], 1u);
+    dev->current_fault = bit_is_set(data[4], 2u);
+    /* Bit 3 is reserved until AMS firmware actually decodes IMD state. */
+    dev->charger_fault = bit_is_set(data[4], 4u);
+    dev->adbms_diag_fault = bit_is_set(data[4], 5u);
+    dev->task_heartbeat_fault = bit_is_set(data[4], 6u);
+    dev->logger_heartbeat_fault = bit_is_set(data[4], 7u);
+
+    dev->compact_status_valid = true;
+    dev->compact_status_rx_count++;
+    dev->last_status_rx_tick = now_ms;
+    mark_rx(dev, now_ms);
+    return true;
+}
+
+static bool ams_parse_compact_electrical_frame(ams_t *dev, const uint8_t *data, uint8_t dlc, uint32_t now_ms)
+{
+    if((dev == NULL) || (data == NULL) || (dlc != AMS_FRAME_DLC))
+    {
+        if(dev != NULL)
+        {
+            dev->bad_rx_count++;
+        }
+        return false;
+    }
+
+    dev->pack_voltage_0p1v = u16_be(&data[0]);
+    dev->pack_current_0p1a = s16_be(&data[2]);
+    dev->min_cell_mv = u16_be(&data[4]);
+    dev->max_cell_mv = u16_be(&data[6]);
+    dev->compact_electrical_valid = true;
+    mark_rx(dev, now_ms);
+    return true;
+}
+
+static bool ams_parse_compact_thermal_frame(ams_t *dev, const uint8_t *data, uint8_t dlc, uint32_t now_ms)
+{
+    if((dev == NULL) || (data == NULL) || (dlc != AMS_FRAME_DLC))
+    {
+        if(dev != NULL)
+        {
+            dev->bad_rx_count++;
+        }
+        return false;
+    }
+
+    dev->max_temp_0p1c = s16_be(&data[0]);
+    dev->min_temp_0p1c = s16_be(&data[2]);
+    dev->avg_temp_0p1c = s16_be(&data[4]);
+    dev->max_fan_percent = data[6];
+    dev->thermal_flags = data[7];
+    dev->compact_thermal_valid = true;
+    mark_rx(dev, now_ms);
+    return true;
+}
+
+static bool ams_parse_compact_health_frame(ams_t *dev, const uint8_t *data, uint8_t dlc, uint32_t now_ms)
+{
+    if((dev == NULL) || (data == NULL) || (dlc != AMS_FRAME_DLC))
+    {
+        if(dev != NULL)
+        {
+            dev->bad_rx_count++;
+        }
+        return false;
+    }
+
+    dev->max_voltage_segment = data[0];
+    dev->max_voltage_cell = data[1];
+    dev->min_voltage_segment = data[2];
+    dev->min_voltage_cell = data[3];
+    dev->max_temp_segment = data[4];
+    dev->max_temp_sensor = data[5];
+    dev->usable_cell_count = data[6];
+    dev->usable_temp_count = data[7];
+    dev->compact_health_valid = true;
+    mark_rx(dev, now_ms);
+    return true;
+}
+
+bool ams_is_known_can_id(uint32_t std_id)
+{
+    return ((std_id == AMS_TELEM_CANBUS_ID) ||
+            (std_id == AMS_ESTIMATOR_CANBUS_ID) ||
+            (std_id == AMS_ECU_STATUS_CANBUS_ID) ||
+            (std_id == AMS_ECU_ELECTRICAL_CANBUS_ID) ||
+            (std_id == AMS_ECU_THERMAL_CANBUS_ID) ||
+            (std_id == AMS_ECU_HEALTH_CANBUS_ID));
+}
+
 bool ams_parse_can_frame(ams_t *dev, uint32_t std_id, bool is_standard, uint8_t dlc, const uint8_t *data, uint32_t now_ms)
 {
     if((dev == NULL) || (data == NULL) || !is_standard)
@@ -242,21 +394,82 @@ bool ams_parse_can_frame(ams_t *dev, uint32_t std_id, bool is_standard, uint8_t 
         return ams_parse_estimator_frame(dev, data, dlc, now_ms);
     }
 
+    if(std_id == AMS_ECU_STATUS_CANBUS_ID)
+    {
+        return ams_parse_compact_status_frame(dev, data, dlc, now_ms);
+    }
+
+    if(std_id == AMS_ECU_ELECTRICAL_CANBUS_ID)
+    {
+        return ams_parse_compact_electrical_frame(dev, data, dlc, now_ms);
+    }
+
+    if(std_id == AMS_ECU_THERMAL_CANBUS_ID)
+    {
+        return ams_parse_compact_thermal_frame(dev, data, dlc, now_ms);
+    }
+
+    if(std_id == AMS_ECU_HEALTH_CANBUS_ID)
+    {
+        return ams_parse_compact_health_frame(dev, data, dlc, now_ms);
+    }
+
     return false;
 }
 
 void ams_update_stale(ams_t *dev, uint32_t now_ms)
 {
+    uint32_t freshness_tick;
+
     if(dev == NULL)
     {
         return;
     }
 
-    if(dev->rx_count == 0u)
+    if(dev->compact_status_valid)
+    {
+        freshness_tick = dev->last_status_rx_tick;
+    }
+    else if(dev->rx_count != 0u)
+    {
+        freshness_tick = dev->last_rx_tick;
+    }
+    else
     {
         dev->stale = true;
         return;
     }
 
-    dev->stale = ((uint32_t)(now_ms - dev->last_rx_tick) > AMS_STALE_TIMEOUT_MS);
+    dev->stale = ((uint32_t)(now_ms - freshness_tick) > AMS_STALE_TIMEOUT_MS);
+}
+
+bool ams_allows_torque(const ams_t *dev)
+{
+    if(dev == NULL)
+    {
+        return false;
+    }
+
+    if(dev->compact_status_valid)
+    {
+        return (!dev->stale &&
+                dev->bms_ok &&
+                !dev->bms_inhibited &&
+                !dev->ams_hard_fault &&
+                !dev->ams_soft_fault &&
+                dev->voltage_valid &&
+                dev->current_valid &&
+                dev->temp_valid &&
+                !dev->ams_can_fault &&
+                !dev->voltage_fault &&
+                !dev->temp_fault &&
+                !dev->current_fault &&
+                !dev->charger_fault &&
+                !dev->adbms_diag_fault &&
+                !dev->task_heartbeat_fault &&
+                !dev->logger_heartbeat_fault &&
+                !dev->compact_sequence_repeated);
+    }
+
+    return (!dev->stale && (dev->rx_count != 0u));
 }

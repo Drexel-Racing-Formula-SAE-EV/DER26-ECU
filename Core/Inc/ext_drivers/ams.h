@@ -16,53 +16,119 @@
 #define NVOLTS 15
 #define NTEMPS 17
 
+/* Legacy paged AMS telemetry. Kept for bench compatibility. */
 #define AMS_TELEM_CANBUS_ID 0x69u
 #define AMS_ESTIMATOR_CANBUS_ID 0x421u
 #define AMS_PACKET_COUNT 62u
+
+/* Compact AMS->ECU frames from the hardened AMS firmware. */
+#define AMS_ECU_STATUS_CANBUS_ID 0x680u
+#define AMS_ECU_ELECTRICAL_CANBUS_ID 0x681u
+#define AMS_ECU_THERMAL_CANBUS_ID 0x682u
+#define AMS_ECU_HEALTH_CANBUS_ID 0x683u
+#define AMS_ECU_COMPACT_PROTOCOL_VERSION 1u
+
 #define AMS_FRAME_DLC 8u
 #define AMS_STALE_TIMEOUT_MS 500u
 
 typedef struct
 {
-	uint16_t header;
-	uint16_t *d0;
-	uint16_t *d1;
-	uint16_t *d2;
+    uint16_t header;
+    uint16_t *d0;
+    uint16_t *d1;
+    uint16_t *d2;
 } ams_data_packet_t;
 
 typedef struct
 {
-	uint16_t volts[NVOLTS];
-	uint16_t temps[NTEMPS];
+    uint16_t volts[NVOLTS];
+    uint16_t temps[NTEMPS];
 } segment_t;
 
 typedef struct
 {
-	uint16_t words[4];
-	uint32_t last_rx_tick;
-	uint32_t rx_count;
-	bool valid;
+    uint16_t words[4];
+    uint32_t last_rx_tick;
+    uint32_t rx_count;
+    bool valid;
 } ams_estimator_status_t;
 
 typedef struct
 {
-	uint16_t state;
-	uint16_t air_state;
-	uint16_t imd_ok;
-	uint16_t imd_status;
-	uint16_t imd_duty;
-	uint16_t current;
-	uint16_t max_temp;
-	uint16_t min_volt;
-	uint16_t max_volt;
-	segment_t segs[NSEGS];
-	uint16_t fans[NFANS];
-	ams_estimator_status_t estimator;
-	uint32_t last_rx_tick;
-	uint32_t rx_count;
-	uint32_t bad_rx_count;
-	uint16_t last_packet_header;
-	bool stale;
+    uint16_t state;
+    uint16_t air_state;
+    uint16_t imd_ok;
+    uint16_t imd_status;
+    uint16_t imd_duty;
+    uint16_t current;
+    uint16_t max_temp;
+    uint16_t min_volt;
+    uint16_t max_volt;
+    segment_t segs[NSEGS];
+    uint16_t fans[NFANS];
+    ams_estimator_status_t estimator;
+
+    /* Compact 0x680 status frame. */
+    uint8_t compact_protocol_version;
+    uint8_t compact_sequence;
+    uint8_t compact_state;
+    uint8_t compact_status_flags;
+    uint8_t compact_fault_flags;
+    uint8_t voltage_fault_reason;
+    uint8_t temp_fault_reason;
+    uint8_t current_fault_reason;
+    bool compact_status_valid;
+    bool bms_ok;
+    bool bms_inhibited;
+    bool ams_hard_fault;
+    bool ams_soft_fault;
+    bool voltage_valid;
+    bool current_valid;
+    bool temp_valid;
+    bool ams_can_fault;
+    bool voltage_fault;
+    bool temp_fault;
+    bool current_fault;
+    bool charger_fault;
+    bool adbms_diag_fault;
+    bool task_heartbeat_fault;
+    bool logger_heartbeat_fault;
+    bool compact_sequence_repeated;
+    uint32_t compact_status_rx_count;
+    uint32_t compact_sequence_error_count;
+    uint32_t last_status_rx_tick;
+
+    /* Compact 0x681 electrical frame. */
+    uint16_t pack_voltage_0p1v;
+    int16_t pack_current_0p1a;
+    uint16_t min_cell_mv;
+    uint16_t max_cell_mv;
+    bool compact_electrical_valid;
+
+    /* Compact 0x682 thermal frame. */
+    int16_t max_temp_0p1c;
+    int16_t min_temp_0p1c;
+    int16_t avg_temp_0p1c;
+    uint8_t max_fan_percent;
+    uint8_t thermal_flags;
+    bool compact_thermal_valid;
+
+    /* Compact 0x683 health/location frame. */
+    uint8_t max_voltage_segment;
+    uint8_t max_voltage_cell;
+    uint8_t min_voltage_segment;
+    uint8_t min_voltage_cell;
+    uint8_t max_temp_segment;
+    uint8_t max_temp_sensor;
+    uint8_t usable_cell_count;
+    uint8_t usable_temp_count;
+    bool compact_health_valid;
+
+    uint32_t last_rx_tick;
+    uint32_t rx_count;
+    uint32_t bad_rx_count;
+    uint16_t last_packet_header;
+    bool stale;
 } ams_t;
 
 void segment_init(segment_t *dev);
@@ -70,7 +136,8 @@ void ams_init(ams_t *dev);
 bool ams_parse_telemetry_frame(ams_t *dev, const uint8_t *data, uint8_t dlc, uint32_t now_ms);
 bool ams_parse_estimator_frame(ams_t *dev, const uint8_t *data, uint8_t dlc, uint32_t now_ms);
 bool ams_parse_can_frame(ams_t *dev, uint32_t std_id, bool is_standard, uint8_t dlc, const uint8_t *data, uint32_t now_ms);
+bool ams_is_known_can_id(uint32_t std_id);
 void ams_update_stale(ams_t *dev, uint32_t now_ms);
-
+bool ams_allows_torque(const ams_t *dev);
 
 #endif /* __AMS_H_ */

@@ -18,6 +18,7 @@
 
 #define TO_LSB(x) ((uint8_t)((x) & 0xffu))
 #define TO_MSB(x) ((uint8_t)(((x) >> 8u) & 0xffu))
+#define CM200_DISABLE_UNLOCK_CYCLES 5u
 
 /**
  * @brief Actual APPS task function
@@ -25,6 +26,38 @@
  * @param arg App_data struct pointer converted to void pointer
  */
 void apps_task_fn(void *arg);
+
+static void cm200_build_disable_packet(canbus_packet_t *packet)
+{
+    if(packet == NULL)
+    {
+        return;
+    }
+
+    packet->id = CM_CANBUS_ID;
+    memset(packet->data, 0, sizeof(packet->data));
+    packet->data[4] = 0u; /* Direction field. Keep disabled while zero torque. */
+    packet->data[5] = 0u; /* Inverter enable bit = disabled. */
+}
+
+static void cm200_build_torque_packet(canbus_packet_t *packet, uint16_t torque_cmd)
+{
+    if(packet == NULL)
+    {
+        return;
+    }
+
+    packet->id = CM_CANBUS_ID;
+    memset(packet->data, 0, sizeof(packet->data));
+    packet->data[0] = TO_LSB(torque_cmd);
+    packet->data[1] = TO_MSB(torque_cmd);
+    packet->data[2] = 0u;
+    packet->data[3] = 0u;
+    packet->data[4] = 1u; /* Direction: 0-backward, 1-forward; motor is mounted backwards. */
+    packet->data[5] = 1u; /* Inverter Enable: 0-disable, 1-enable. */
+    packet->data[6] = 0u;
+    packet->data[7] = 0u;
+}
 
 TaskHandle_t apps_task_start(app_data_t *data)
 {
@@ -35,7 +68,7 @@ TaskHandle_t apps_task_start(app_data_t *data)
         return NULL;
     }
 
-    xTaskCreate(apps_task_fn, "APPS task", 128, (void *)data, APPS_PRIO, &handle);
+    xTaskCreate(apps_task_fn, "APPS task", 256, (void *)data, APPS_PRIO, &handle);
     return handle;
 }
 
@@ -54,9 +87,10 @@ void apps_task_fn(void *arg)
     float throttle_raw;
     uint16_t throttle_hex;
     uint32_t entry;
+    uint8_t disable_unlock_cycles = CM200_DISABLE_UNLOCK_CYCLES;
+    bool torque_allowed;
 
-    tx_packet.id = CM_CANBUS_ID;
-    memset(tx_packet.data, 0, sizeof(tx_packet.data));
+    cm200_build_disable_packet(&tx_packet);
 
     for(;;)
     {
@@ -65,89 +99,81 @@ void apps_task_fn(void *arg)
         apps1->count = stm32f767_adc_read(apps1->handle);
         apps2->count = stm32f767_adc_read(apps2->handle);
 
-
-//        if(!poten_check_failure(apps1->count, APPS_IMPLAUSIBILITY_MAX, APPS_IMPLAUSIBILITY_MIN) ||
-//           !poten_check_failure(apps2->count, APPS_IMPLAUSIBILITY_MAX, APPS_IMPLAUSIBILITY_MIN))
-//        {
-//        	data->apps_fault = true;
-//        } else {
-//
-//        }
-
         apps1->percent = poten_get_percent(apps1);
         apps2->percent = poten_get_percent(apps2);
 
-        throttle_raw = 100 - ((apps1->percent + apps2->percent) / 2);
-//        throttle_raw = 100 - apps2->percent;
-        if(throttle_raw < 0){
-        	throttle_raw = 0;
+        throttle_raw = 100.0f - ((apps1->percent + apps2->percent) / 2.0f);
+        if(throttle_raw < 0.0f)
+        {
+            throttle_raw = 0.0f;
         }
-//        if(throttle_raw > 15){
-//        	throttle_raw = 15;
-//        }
         data->throttle = (int)throttle_raw;
 
-        // T.4.2.5 (2022)
+        /* T.4.2.5 (2022). */
         if(!poten_check_plausibility(apps1->percent, apps2->percent, PLAUSIBILITY_THRESH, APPS_FREQ / 10))
         {
             data->apps_fault = true;
-        } else if(!poten_check_failure(apps1->count, APPS_IMPLAUSIBILITY_MAX, APPS_IMPLAUSIBILITY_MIN) ||
-                  !poten_check_failure(apps2->count, APPS_IMPLAUSIBILITY_MAX, APPS_IMPLAUSIBILITY_MIN)) {
-        	data->apps_fault = true;
-        } else {
-        	data->apps_fault = false;
         }
-
-        if(!data->cascadia_ok)
+        else if(!poten_check_failure(apps1->count, APPS_IMPLAUSIBILITY_MAX, APPS_IMPLAUSIBILITY_MIN) ||
+                !poten_check_failure(apps2->count, APPS_IMPLAUSIBILITY_MAX, APPS_IMPLAUSIBILITY_MIN))
         {
-            memset(tx_packet.data, 0, sizeof(tx_packet.data));
-        }
-        else if(data->hard_fault ||
-                data->apps_fault ||
-                data->rtd_mode != RTD_ENABLED ||
-                data->bppc_fault ||
-                data->bse_fault ||
-                data->ams_fault ||
-                data->canbus_fault ||
-                data->canbus_rx_fault ||
-                data->canbus_tx_fault ||
-                data->imd_fail ||
-                data->bms_fail ||
-                data->bspd_fail)
-        {
-            tx_packet.data[0] = 0;
-            tx_packet.data[1] = 0;
-            tx_packet.data[2] = 0;
-            tx_packet.data[3] = 0;
-            tx_packet.data[4] = 0; // Direction: 0-backward, 1-forward (motor is mounted backwards
-            tx_packet.data[5] = 0; // Inverter Enable: 0-disable, 1-enable
-            tx_packet.data[6] = 0;
-            tx_packet.data[7] = 0;
+            data->apps_fault = true;
         }
         else
         {
-            throttle_hex = (uint16_t)(data->throttle * MAXTRQ / 10.0); // CM CANBus Protocol
-            tx_packet.data[0] = TO_LSB(throttle_hex);
-            tx_packet.data[1] = TO_MSB(throttle_hex);
-            tx_packet.data[2] = 0;
-            tx_packet.data[3] = 0;
-            tx_packet.data[4] = 1; // Direction: 0-backward, 1-forward (motor is mounted backwards
-            tx_packet.data[5] = 1; // Inverter Enable: 0-disable, 1-enable
-            tx_packet.data[6] = 0;
-            tx_packet.data[7] = 0;
+            data->apps_fault = false;
         }
-        taskENTER_CRITICAL();
-        data->board.canbus.tx_packet = tx_packet;
-        taskEXIT_CRITICAL();
 
-        if(data->canbus_task != NULL)
+        torque_allowed = (data->cascadia_ok &&
+                          !data->hard_fault &&
+                          !data->apps_fault &&
+                          (data->rtd_mode == RTD_ENABLED) &&
+                          !data->bppc_fault &&
+                          !data->bse_fault &&
+                          !data->ams_fault &&
+                          !data->canbus_fault &&
+                          !data->canbus_rx_fault &&
+                          !data->canbus_tx_fault &&
+                          !data->imd_fail &&
+                          !data->bms_fail &&
+                          !data->bspd_fail);
+
+        if(!torque_allowed)
         {
-            xTaskNotify(data->canbus_task, CANBUS_APPS, eSetBits);
+            disable_unlock_cycles = CM200_DISABLE_UNLOCK_CYCLES;
+            cm200_build_disable_packet(&tx_packet);
+        }
+        else if(disable_unlock_cycles > 0u)
+        {
+            /*
+             * CM200 enable lockout requires disable commands before enable after boot/fault.
+             * Keep zero torque/disable for several APPS cycles before enabling torque.
+             */
+            disable_unlock_cycles--;
+            cm200_build_disable_packet(&tx_packet);
+        }
+        else
+        {
+            throttle_hex = (uint16_t)(data->throttle * MAXTRQ / 10.0f); /* CM CANBus protocol scale. */
+            cm200_build_torque_packet(&tx_packet, throttle_hex);
+        }
+
+        if(canbus_queue_tx(&data->board.canbus, &tx_packet) == HAL_OK)
+        {
+            if(data->canbus_task != NULL)
+            {
+                xTaskNotify(data->canbus_task, CANBUS_APPS, eSetBits);
+            }
+            else
+            {
+                data->canbus_tx_fault = true;
+            }
         }
         else
         {
             data->canbus_tx_fault = true;
         }
+
         osDelayUntil(entry + (1000 / APPS_FREQ));
     }
 }

@@ -9,6 +9,9 @@ Current coverage:
 - estimator CAN frame raw storage
 - stale AMS telemetry detection
 - invalid CAN frame rejection
+- compact AMS `0x680-0x683` frame parsing
+- compact BMS_OK/validity/fault torque-gate behavior
+- compact rolling-sequence stale/repeat checks
 
 Run from `host_tests/`:
 
@@ -31,5 +34,8 @@ make CC=gcc analyze
 - raw estimator status packet storage
 - stale-CAN timeout behavior, including timer wraparound
 - full packet sweep over packet IDs 0 through 61
+- compact AMS status/electrical/thermal/health frame decoding
+- compact status fault gating and reserved IMD bit behavior
+- compact sequence repeat detection and status-frame-only freshness
 
 `make test` keeps the broader regression harness. `make ci` runs unit tests, regression tests, and GCC analyzer.

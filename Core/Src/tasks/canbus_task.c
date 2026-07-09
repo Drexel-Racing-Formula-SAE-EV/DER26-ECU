@@ -46,18 +46,28 @@ void canbus_task_fn(void *arg)
     canbus_t *canbus = &data->board.canbus;
     canbus_packet_t can_packet;
     uint32_t task_notification;
+    HAL_StatusTypeDef tx_status;
 
     for(;;)
     {
         xTaskNotifyWait(0, 0xFFFFFFFFu, &task_notification, HAL_MAX_DELAY);
-        if(task_notification & CANBUS_APPS)
-        {
-            taskENTER_CRITICAL();
-            can_packet = canbus->tx_packet;
-            memset(canbus->tx_packet.data, 0, sizeof(canbus->tx_packet.data));
-            taskEXIT_CRITICAL();
+        (void)task_notification;
 
-            data->canbus_tx_fault = (canbus_transmit(canbus, &can_packet, CANBUS_TX_TIMEOUT_MS) != HAL_OK);
+        if(canbus->tx_queue == NULL)
+        {
+            data->canbus_tx_fault = true;
+            continue;
+        }
+
+        while(xQueueReceive(canbus->tx_queue, &can_packet, 0u) == pdPASS)
+        {
+            tx_status = canbus_transmit(canbus, &can_packet, CANBUS_TX_TIMEOUT_MS);
+            if(tx_status != HAL_OK)
+            {
+                data->canbus_tx_fault = true;
+                break;
+            }
+            data->canbus_tx_fault = false;
         }
     }
 }

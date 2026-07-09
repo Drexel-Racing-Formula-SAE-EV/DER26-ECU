@@ -28,7 +28,7 @@ TaskHandle_t bppc_task_start(app_data_t *data)
        return NULL;
    }
 
-   xTaskCreate(bppc_task_fn, "BPPC task", 128, (void *)data, BPPC_PRIO, &handle);
+   xTaskCreate(bppc_task_fn, "BPPC task", 256, (void *)data, BPPC_PRIO, &handle);
    return handle;
 }
 

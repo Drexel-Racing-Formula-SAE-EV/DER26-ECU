@@ -28,7 +28,7 @@ TaskHandle_t error_task_start(app_data_t *data)
         return NULL;
     }
 
-    xTaskCreate(error_task_fn, "ERROR task", 128, (void *)data, ERR_PRIO, &handle);
+    xTaskCreate(error_task_fn, "ERROR task", 256, (void *)data, ERR_PRIO, &handle);
     return handle;
 }
 
@@ -50,7 +50,7 @@ void error_task_fn(void *arg)
         bool cascadia_enable_allowed;
 
         ams_update_stale(&data->board.ams, entry);
-        data->ams_fault = data->board.ams.stale;
+        data->ams_fault = !ams_allows_torque(&data->board.ams);
         data->canbus_fault = (data->canbus_rx_fault || data->canbus_tx_fault);
 
         data->cascadia_error = HAL_GPIO_ReadPin(MTR_Fault_GPIO_Port, MTR_Fault_Pin);

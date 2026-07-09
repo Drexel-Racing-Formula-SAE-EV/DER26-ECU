@@ -28,7 +28,7 @@ TaskHandle_t acc_task_start(app_data_t *data)
         return NULL;
     }
 
-    xTaskCreate(acc_task_fn, "ACC task", 128, (void *)data, ACC_PRIO, &handle);
+    xTaskCreate(acc_task_fn, "ACC task", 256, (void *)data, ACC_PRIO, &handle);
     return handle;
 }
 

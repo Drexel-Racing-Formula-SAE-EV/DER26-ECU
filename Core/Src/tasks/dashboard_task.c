@@ -31,7 +31,7 @@ TaskHandle_t dashboard_task_start(app_data_t *data)
        return NULL;
    }
 
-   xTaskCreate(dashboard_task_fn, "Dashboard task", 128, (void *)data, DASH_PRIO, &handle);
+   xTaskCreate(dashboard_task_fn, "Dashboard task", 256, (void *)data, DASH_PRIO, &handle);
    return handle;
 }
 

@@ -10,6 +10,8 @@ static int failures = 0;
 #define EXPECT_TRUE(expr) do { if(!(expr)) { printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #expr); failures++; } } while(0)
 #define EXPECT_FALSE(expr) EXPECT_TRUE(!(expr))
 #define EXPECT_EQ_U16(actual, expected) do { uint16_t a=(uint16_t)(actual); uint16_t e=(uint16_t)(expected); if(a != e) { printf("FAIL %s:%d: %s=%u expected=%u\n", __FILE__, __LINE__, #actual, (unsigned)a, (unsigned)e); failures++; } } while(0)
+#define EXPECT_EQ_I16(actual, expected) do { int16_t a=(int16_t)(actual); int16_t e=(int16_t)(expected); if(a != e) { printf("FAIL %s:%d: %s=%d expected=%d\n", __FILE__, __LINE__, #actual, (int)a, (int)e); failures++; } } while(0)
+#define EXPECT_EQ_U8(actual, expected) do { uint8_t a=(uint8_t)(actual); uint8_t e=(uint8_t)(expected); if(a != e) { printf("FAIL %s:%d: %s=%u expected=%u\n", __FILE__, __LINE__, #actual, (unsigned)a, (unsigned)e); failures++; } } while(0)
 #define EXPECT_EQ_U32(actual, expected) do { uint32_t a=(uint32_t)(actual); uint32_t e=(uint32_t)(expected); if(a != e) { printf("FAIL %s:%d: %s=%lu expected=%lu\n", __FILE__, __LINE__, #actual, (unsigned long)a, (unsigned long)e); failures++; } } while(0)
 
 static void put_u16_be(uint8_t *dst, uint16_t v)
@@ -141,6 +143,28 @@ static void test_estimator_packet_raw_storage(void)
     EXPECT_EQ_U32(ams.estimator.rx_count, 1u);
 }
 
+
+static void test_compact_status_and_electrical_parse(void)
+{
+    ams_t ams;
+    uint8_t status[8] = {AMS_ECU_COMPACT_PROTOCOL_VERSION, 1u, 2u, 0x71u, 0u, 0u, 0u, 0u};
+    uint8_t electrical[8] = {0x0Cu, 0x80u, 0x00u, 0x7Bu, 0x0Bu, 0xEAu, 0x10u, 0x68u};
+    ams_init(&ams);
+
+    EXPECT_TRUE(ams_parse_can_frame(&ams, AMS_ECU_STATUS_CANBUS_ID, true, 8u, status, 100u));
+    EXPECT_TRUE(ams.compact_status_valid);
+    EXPECT_TRUE(ams_allows_torque(&ams));
+    EXPECT_EQ_U8(ams.compact_sequence, 1u);
+    EXPECT_EQ_U8(ams.compact_state, 2u);
+
+    EXPECT_TRUE(ams_parse_can_frame(&ams, AMS_ECU_ELECTRICAL_CANBUS_ID, true, 8u, electrical, 110u));
+    EXPECT_TRUE(ams.compact_electrical_valid);
+    EXPECT_EQ_U16(ams.pack_voltage_0p1v, 3200u);
+    EXPECT_EQ_I16(ams.pack_current_0p1a, 123);
+    EXPECT_EQ_U16(ams.min_cell_mv, 3050u);
+    EXPECT_EQ_U16(ams.max_cell_mv, 4200u);
+}
+
 static void run_test(const char *name, void (*fn)(void))
 {
     int before = failures;
@@ -160,6 +184,7 @@ int main(void)
     run_test("invalid frames rejected", test_invalid_frames_rejected);
     run_test("stale logic", test_stale_logic);
     run_test("estimator packet raw storage", test_estimator_packet_raw_storage);
+    run_test("compact status and electrical parse", test_compact_status_and_electrical_parse);
 
     if(failures != 0)
     {

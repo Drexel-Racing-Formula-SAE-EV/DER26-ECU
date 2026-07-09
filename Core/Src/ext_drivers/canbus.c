@@ -1,12 +1,12 @@
 /**
  * @file canbus.c
  * @author Cole Bardin (cab572@drexel.edu)
- * @brief 
+ * @brief
  * @version 0.1
  * @date 2023-04-24
- * 
+ *
  * @copyright Copyright (c) 2023
- * 
+ *
  */
 
 #include "ext_drivers/canbus.h"
@@ -20,6 +20,8 @@ void canbus_device_init(canbus_t *dev, CAN_HandleTypeDef *hcan, CAN_TxHeaderType
 
     dev->hcan = hcan;
     dev->tx_header = tx_header;
+    dev->tx_dropped_count = 0u;
+    dev->tx_queue = xQueueCreate(CANBUS_TX_QUEUE_LENGTH, sizeof(canbus_packet_t));
 
     dev->tx_header->IDE = CAN_ID_STD;
     dev->tx_header->StdId = 0x00;
@@ -31,6 +33,21 @@ void canbus_device_init(canbus_t *dev, CAN_HandleTypeDef *hcan, CAN_TxHeaderType
     (void)HAL_CAN_Start(hcan);
 }
 
+HAL_StatusTypeDef canbus_queue_tx(canbus_t *dev, const canbus_packet_t *packet)
+{
+    if((dev == NULL) || (packet == NULL) || (dev->tx_queue == NULL))
+    {
+        return HAL_ERROR;
+    }
+
+    if(xQueueSend(dev->tx_queue, packet, 0u) != pdPASS)
+    {
+        dev->tx_dropped_count++;
+        return HAL_BUSY;
+    }
+
+    return HAL_OK;
+}
 
 HAL_StatusTypeDef canbus_transmit(canbus_t *dev, const canbus_packet_t *packet, uint32_t timeout_ms)
 {

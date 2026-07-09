@@ -256,17 +256,15 @@ void UART7_IRQHandler(void)
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart){
 	extern app_data_t app;
 	cli_t *cli = &app.board.cli;
-	char endl[] = "\r\n";
-	HAL_StatusTypeDef ret = 0;
+	HAL_StatusTypeDef ret;
 
-	if(cli->huart->Instance == huart->Instance)
+	if((cli->huart != NULL) && (cli->huart->Instance == huart->Instance))
 	{
 		if(cli->c == '\r')
 		{
-			ret = HAL_UART_Transmit_IT(cli->huart, (uint8_t *)endl, strlen(endl));
 			cli->line[cli->index] = '\0';
-			cli->index = 0;
-			if(strlen(cli->line) > 0)
+			cli->index = 0u;
+			if(strnlen(cli->line, CLI_LINESZ) > 0u)
 			{
 				cli->msg_pending = true;
 				cli->msg_count++;
@@ -274,32 +272,29 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart){
 		}
 		else if(cli->c == '\n')
 		{
-			// ignore \r
+			/* Ignore line-feed. Carriage-return terminates CLI commands. */
 		}
-		else if(cli->c == 127)
+		else if((cli->c == 127u) || (cli->c == '\b'))
 		{
-			uint8_t del = 127;
-			if(cli->index != 0)
+			if(cli->index != 0u)
 			{
 				cli->index--;
-				cli->line[cli->index] = ' ';
-				ret = HAL_UART_Transmit_IT(cli->huart, &cli->c, 1);
-				ret = HAL_UART_Transmit_IT(cli->huart, (uint8_t *)&cli->line[cli->index], 1);
-				ret = HAL_UART_Transmit_IT(cli->huart, &del, 1);
+				cli->line[cli->index] = '\0';
 			}
 		}
-		else if(cli->c >= 32 && cli->c <= 126)
+		else if((cli->c >= 32u) && (cli->c <= 126u))
 		{
-			if(cli->index != CLI_LINESZ - 1)
+			if(cli->index < (CLI_LINESZ - 1u))
 			{
-				cli->line[cli->index++] = cli->c;
-				ret = HAL_UART_Transmit_IT(cli->huart, &cli->c, 1);
+				cli->line[cli->index++] = (char)cli->c;
 			}
 		}
+
 		ret = HAL_UART_Receive_IT(cli->huart, &cli->c, 1);
 		app.cli_fault = (ret != HAL_OK);
 	}
 }
+
 
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
 	extern app_data_t app;
@@ -333,8 +328,7 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
                                       rx_packet->data,
                                       osKernelGetTickCount());
 
-	if(!parsed && (rx_header.IDE == CAN_ID_STD) &&
-	   ((rx_header.StdId == AMS_TELEM_CANBUS_ID) || (rx_header.StdId == AMS_ESTIMATOR_CANBUS_ID)))
+	if(!parsed && (rx_header.IDE == CAN_ID_STD) && ams_is_known_can_id(rx_header.StdId))
     {
         app.canbus_rx_fault = true;
     }

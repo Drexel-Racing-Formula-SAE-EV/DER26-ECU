@@ -54,7 +54,7 @@ void app_create()
 	app.fw_override_state = false;
 	app.tsal = false;
 	app.rtd_button = false;
-	app.cascadia_ok = true;
+	app.cascadia_ok = false;
 	app.cascadia_error = false;
 	app.cascadia_en = false;
 	app.imd_fail = false;

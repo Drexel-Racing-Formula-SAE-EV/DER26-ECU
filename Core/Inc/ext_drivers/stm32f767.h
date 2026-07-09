@@ -37,6 +37,7 @@ typedef struct {
 	UART_HandleTypeDef huart3;
 
 	osMutexId_t can1_mutex;
+	osMutexId_t adc3_mutex;
 	osMutexId_t i2c2_mutex;
 	osMutexId_t spi6_mutex;
 	osMutexId_t	uart3_mutex;

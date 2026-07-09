@@ -12,6 +12,8 @@
 #include "tasks/bse_task.h"
 #include "main.h"
 
+#define ADC3_MUTEX_TIMEOUT_MS 10u
+
 /**
 * @brief Actual BSE task function
 *
@@ -28,7 +30,7 @@ TaskHandle_t bse_task_start(app_data_t *data)
        return NULL;
    }
 
-   xTaskCreate(bse_task_fn, "BSE task", 128, (void *)data, BSE_PRIO, &handle);
+   xTaskCreate(bse_task_fn, "BSE task", 256, (void *)data, BSE_PRIO, &handle);
    return handle;
 }
 
@@ -47,30 +49,39 @@ void bse_task_fn(void *arg)
     bool bse_plausible;
     uint32_t entry;
 
-	for(;;)
-	{
-		entry = osKernelGetTickCount();
+    for(;;)
+    {
+        entry = osKernelGetTickCount();
 
-		stm32f767_adc_switch_channel(bse1->handle, bse1->channel);
-		bse1->count = stm32f767_adc_read(bse1->handle);
-		stm32f767_adc_switch_channel(bse2->handle, bse2->channel);
-		bse2->count = stm32f767_adc_read(bse2->handle);
+        if(osMutexAcquire(data->board.stm32f767.adc3_mutex, ADC3_MUTEX_TIMEOUT_MS) == osOK)
+        {
+            stm32f767_adc_switch_channel(bse1->handle, bse1->channel);
+            bse1->count = stm32f767_adc_read(bse1->handle);
+            stm32f767_adc_switch_channel(bse2->handle, bse2->channel);
+            bse2->count = stm32f767_adc_read(bse2->handle);
+            osMutexRelease(data->board.stm32f767.adc3_mutex);
+        }
+        else
+        {
+            data->bse_fault = true;
+            osDelayUntil(entry + (1000 / BSE_FREQ));
+            continue;
+        }
 
+        bse_range_ok = (pressure_sensor_check_failure(bse1->count, BSE_IMPLAUSIBILITY_MAX, BSE_IMPLAUSIBILITY_MIN) &&
+                        pressure_sensor_check_failure(bse2->count, BSE_IMPLAUSIBILITY_MAX, BSE_IMPLAUSIBILITY_MIN));
 
-		bse_range_ok = (pressure_sensor_check_failure(bse1->count, BSE_IMPLAUSIBILITY_MAX, BSE_IMPLAUSIBILITY_MIN) &&
-		                pressure_sensor_check_failure(bse2->count, BSE_IMPLAUSIBILITY_MAX, BSE_IMPLAUSIBILITY_MIN));
+        bse1->percent = pressure_sensor_get_percent(bse1);
+        bse2->percent = pressure_sensor_get_percent(bse2);
 
-		bse1->percent = pressure_sensor_get_percent(bse1);
-		bse2->percent = pressure_sensor_get_percent(bse2);
+        /* T.4.3.3 (2022). */
+        bse_plausible = pressure_sensor_check_implausibility(bse1->percent, bse2->percent, PLAUSIBILITY_THRESH, BSE_FREQ / 10);
+        data->bse_fault = (!bse_range_ok || !bse_plausible);
 
-		// T.4.3.3 (2022)
-		bse_plausible = pressure_sensor_check_implausibility(bse1->percent, bse2->percent, PLAUSIBILITY_THRESH, BSE_FREQ / 10);
-		data->bse_fault = (!bse_range_ok || !bse_plausible);
+        brake_raw = (bse1->percent + bse2->percent) / 2.0f;
+        data->brake = (int)brake_raw;
+        set_brakelight((data->brake >= BRAKE_LIGHT_THRESH));
 
-		brake_raw = (bse1->percent + bse2->percent) / 2;
-		data->brake = (int)brake_raw;
-		set_brakelight((data->brake >= BRAKE_LIGHT_THRESH));
-
-		osDelayUntil(entry + (1000 / BSE_FREQ));
-	}
+        osDelayUntil(entry + (1000 / BSE_FREQ));
+    }
 }

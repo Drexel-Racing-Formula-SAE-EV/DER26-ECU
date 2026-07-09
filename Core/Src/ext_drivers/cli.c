@@ -30,16 +30,18 @@ int cli_printline(cli_t *dev, char *line)
 	static char nl[] = "\r\n";
 	HAL_StatusTypeDef ret = 0;
 
+	if((dev == NULL) || (line == NULL) || (dev->huart == NULL))
+	{
+		return HAL_ERROR;
+	}
+
 	if(xPortIsInsideInterrupt())
 	{
-		ret |= HAL_UART_Transmit_IT(dev->huart, (uint8_t *)line, strlen(line));
-		ret |= HAL_UART_Transmit_IT(dev->huart, (uint8_t*)nl, strlen(nl));
+		return HAL_BUSY;
 	}
-	else
-	{
-		ret |= HAL_UART_Transmit(dev->huart, (uint8_t *)line, strlen(line), 100);
-		ret |= HAL_UART_Transmit(dev->huart, (uint8_t *)nl, strlen(nl), 100);
-	}
+
+	ret |= HAL_UART_Transmit(dev->huart, (uint8_t *)line, strlen(line), 100);
+	ret |= HAL_UART_Transmit(dev->huart, (uint8_t *)nl, strlen(nl), 100);
 	return ret;
 }
 
