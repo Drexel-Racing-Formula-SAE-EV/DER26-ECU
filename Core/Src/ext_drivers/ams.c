@@ -254,7 +254,8 @@ static bool ams_parse_compact_status_frame(ams_t *dev, const uint8_t *data, uint
     {
         expected = (uint8_t)(dev->compact_sequence + 1u);
         dev->compact_sequence_repeated = (sequence == dev->compact_sequence);
-        if(dev->compact_sequence_repeated || (sequence != expected))
+        dev->compact_sequence_fault = (sequence != expected);
+        if(dev->compact_sequence_fault)
         {
             dev->compact_sequence_error_count++;
         }
@@ -262,9 +263,11 @@ static bool ams_parse_compact_status_frame(ams_t *dev, const uint8_t *data, uint
     else
     {
         dev->compact_sequence_repeated = false;
+        dev->compact_sequence_fault = false;
     }
 
     dev->compact_protocol_version = data[0];
+    dev->compact_protocol_valid = (data[0] == AMS_ECU_COMPACT_PROTOCOL_VERSION);
     dev->compact_sequence = sequence;
     dev->compact_state = data[2];
     dev->compact_status_flags = data[3];
@@ -468,8 +471,9 @@ bool ams_allows_torque(const ams_t *dev)
                 !dev->adbms_diag_fault &&
                 !dev->task_heartbeat_fault &&
                 !dev->logger_heartbeat_fault &&
-                !dev->compact_sequence_repeated);
+                dev->compact_protocol_valid &&
+                !dev->compact_sequence_fault);
     }
 
-    return (!dev->stale && (dev->rx_count != 0u));
+    return false;
 }

@@ -12,12 +12,18 @@ Current coverage:
 - compact AMS `0x680-0x683` frame parsing
 - compact BMS_OK/validity/fault torque-gate behavior
 - compact rolling-sequence stale/repeat checks
+- system SIL fault-injection for AMS torque gate, RTD state machine, CM200 disable-before-enable, and torque-gate matrix
+- deterministic fuzz on compact AMS status sequence/fault behavior
 
 Run from `host_tests/`:
 
 ```sh
 make CC=gcc clean
+make CC=gcc unit
 make CC=gcc test
+make CC=gcc system-sil
+make CC=gcc stress
+make CC=gcc asan
 make CC=gcc analyze
 ```
 
@@ -38,4 +44,4 @@ make CC=gcc analyze
 - compact status fault gating and reserved IMD bit behavior
 - compact sequence repeat detection and status-frame-only freshness
 
-`make test` keeps the broader regression harness. `make ci` runs unit tests, regression tests, and GCC analyzer.
+`make test` keeps the broader regression harness. `make system-sil` runs the ECU software-in-the-loop/fault-injection harness. `make stress` reruns the SIL sequence fuzzer with a longer deterministic cycle count. `make ci` runs unit tests, regression tests, system SIL, and GCC analyzer.

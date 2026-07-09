@@ -45,21 +45,24 @@ void canbus_task_fn(void *arg)
 
     canbus_t *canbus = &data->board.canbus;
     canbus_packet_t can_packet;
-    uint32_t task_notification;
     HAL_StatusTypeDef tx_status;
 
     for(;;)
     {
-        xTaskNotifyWait(0, 0xFFFFFFFFu, &task_notification, HAL_MAX_DELAY);
-        (void)task_notification;
-
         if(canbus->tx_queue == NULL)
+        {
+            data->canbus_tx_fault = true;
+            osDelay(10u);
+            continue;
+        }
+
+        if(xQueueReceive(canbus->tx_queue, &can_packet, portMAX_DELAY) != pdPASS)
         {
             data->canbus_tx_fault = true;
             continue;
         }
 
-        while(xQueueReceive(canbus->tx_queue, &can_packet, 0u) == pdPASS)
+        do
         {
             tx_status = canbus_transmit(canbus, &can_packet, CANBUS_TX_TIMEOUT_MS);
             if(tx_status != HAL_OK)
@@ -68,6 +71,6 @@ void canbus_task_fn(void *arg)
                 break;
             }
             data->canbus_tx_fault = false;
-        }
+        } while(xQueueReceive(canbus->tx_queue, &can_packet, 0u) == pdPASS);
     }
 }

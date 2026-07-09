@@ -15,10 +15,7 @@
 #include "main.h"
 #include "tasks/apps_task.h"
 #include "ext_drivers/canbus.h"
-
-#define TO_LSB(x) ((uint8_t)((x) & 0xffu))
-#define TO_MSB(x) ((uint8_t)(((x) >> 8u) & 0xffu))
-#define CM200_DISABLE_UNLOCK_CYCLES 5u
+#include "ext_drivers/ecu_safety.h"
 
 /**
  * @brief Actual APPS task function
@@ -26,38 +23,6 @@
  * @param arg App_data struct pointer converted to void pointer
  */
 void apps_task_fn(void *arg);
-
-static void cm200_build_disable_packet(canbus_packet_t *packet)
-{
-    if(packet == NULL)
-    {
-        return;
-    }
-
-    packet->id = CM_CANBUS_ID;
-    memset(packet->data, 0, sizeof(packet->data));
-    packet->data[4] = 0u; /* Direction field. Keep disabled while zero torque. */
-    packet->data[5] = 0u; /* Inverter enable bit = disabled. */
-}
-
-static void cm200_build_torque_packet(canbus_packet_t *packet, uint16_t torque_cmd)
-{
-    if(packet == NULL)
-    {
-        return;
-    }
-
-    packet->id = CM_CANBUS_ID;
-    memset(packet->data, 0, sizeof(packet->data));
-    packet->data[0] = TO_LSB(torque_cmd);
-    packet->data[1] = TO_MSB(torque_cmd);
-    packet->data[2] = 0u;
-    packet->data[3] = 0u;
-    packet->data[4] = 1u; /* Direction: 0-backward, 1-forward; motor is mounted backwards. */
-    packet->data[5] = 1u; /* Inverter Enable: 0-disable, 1-enable. */
-    packet->data[6] = 0u;
-    packet->data[7] = 0u;
-}
 
 TaskHandle_t apps_task_start(app_data_t *data)
 {
@@ -87,10 +52,11 @@ void apps_task_fn(void *arg)
     float throttle_raw;
     uint16_t throttle_hex;
     uint32_t entry;
-    uint8_t disable_unlock_cycles = CM200_DISABLE_UNLOCK_CYCLES;
+    uint8_t disable_unlock_cycles = ECU_CM200_DISABLE_UNLOCK_CYCLES;
     bool torque_allowed;
 
-    cm200_build_disable_packet(&tx_packet);
+    tx_packet.id = CM_CANBUS_ID;
+    ecu_cm200_build_disable_packet(tx_packet.data);
 
     for(;;)
     {
@@ -124,38 +90,33 @@ void apps_task_fn(void *arg)
             data->apps_fault = false;
         }
 
-        torque_allowed = (data->cascadia_ok &&
-                          !data->hard_fault &&
-                          !data->apps_fault &&
-                          (data->rtd_mode == RTD_ENABLED) &&
-                          !data->bppc_fault &&
-                          !data->bse_fault &&
-                          !data->ams_fault &&
-                          !data->canbus_fault &&
-                          !data->canbus_rx_fault &&
-                          !data->canbus_tx_fault &&
-                          !data->imd_fail &&
-                          !data->bms_fail &&
-                          !data->bspd_fail);
+        const ecu_torque_inputs_t torque_inputs = {
+            .cascadia_ok = data->cascadia_ok,
+            .hard_fault = data->hard_fault,
+            .apps_fault = data->apps_fault,
+            .bppc_fault = data->bppc_fault,
+            .bse_fault = data->bse_fault,
+            .ams_fault = data->ams_fault,
+            .canbus_fault = data->canbus_fault,
+            .canbus_rx_fault = data->canbus_rx_fault,
+            .canbus_tx_fault = data->canbus_tx_fault,
+            .imd_fail = data->imd_fail,
+            .bms_fail = data->bms_fail,
+            .bspd_fail = data->bspd_fail,
+            .rtd_mode = data->rtd_mode,
+        };
 
-        if(!torque_allowed)
+        torque_allowed = ecu_torque_allowed(&torque_inputs);
+        tx_packet.id = CM_CANBUS_ID;
+
+        if(ecu_cm200_update_unlock(torque_allowed, &disable_unlock_cycles))
         {
-            disable_unlock_cycles = CM200_DISABLE_UNLOCK_CYCLES;
-            cm200_build_disable_packet(&tx_packet);
-        }
-        else if(disable_unlock_cycles > 0u)
-        {
-            /*
-             * CM200 enable lockout requires disable commands before enable after boot/fault.
-             * Keep zero torque/disable for several APPS cycles before enabling torque.
-             */
-            disable_unlock_cycles--;
-            cm200_build_disable_packet(&tx_packet);
+            throttle_hex = (uint16_t)(data->throttle * MAXTRQ / 10.0f); /* CM CANBus protocol scale. */
+            ecu_cm200_build_torque_packet(tx_packet.data, throttle_hex);
         }
         else
         {
-            throttle_hex = (uint16_t)(data->throttle * MAXTRQ / 10.0f); /* CM CANBus protocol scale. */
-            cm200_build_torque_packet(&tx_packet, throttle_hex);
+            ecu_cm200_build_disable_packet(tx_packet.data);
         }
 
         if(canbus_queue_tx(&data->board.canbus, &tx_packet) == HAL_OK)

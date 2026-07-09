@@ -18,6 +18,7 @@
 #include "main.h"
 #include "board.h"
 #include "ext_drivers/rtc.h"
+#include "ext_drivers/ecu_safety.h"
 
 #define VER_MAJOR 2
 #define VER_MINOR 2
@@ -53,14 +54,6 @@
 #define COOL_PRIO 3
 
 #define MAXTRQ 200 // maximum nM of toruqe that will be requested from motorcontroller (=100% throttle)
-
-typedef enum {
-	RTD_AWAIT_TSAL,
-	RTD_AWAIT_BUTTON_FALSE,
-	RTD_AWAIT_CONDITIONS,
-	RTD_BUZZING,
-	RTD_ENABLED
-} rtd_state_t;
 
 typedef struct {
 	int throttle;

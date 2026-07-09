@@ -78,6 +78,7 @@ typedef struct
     uint8_t temp_fault_reason;
     uint8_t current_fault_reason;
     bool compact_status_valid;
+    bool compact_protocol_valid;
     bool bms_ok;
     bool bms_inhibited;
     bool ams_hard_fault;
@@ -94,6 +95,7 @@ typedef struct
     bool task_heartbeat_fault;
     bool logger_heartbeat_fault;
     bool compact_sequence_repeated;
+    bool compact_sequence_fault;
     uint32_t compact_status_rx_count;
     uint32_t compact_sequence_error_count;
     uint32_t last_status_rx_tick;

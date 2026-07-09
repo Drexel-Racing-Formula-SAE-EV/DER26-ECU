@@ -72,6 +72,7 @@ The ECU sets `ams_fault` from `ams_allows_torque()`. With compact status availab
 - AMS hard/soft fault bits are false.
 - Voltage/current/temp fault bits are false.
 - Charger, ADBMS diagnostic, task heartbeat, logger heartbeat, and AMS CAN fault bits are false.
-- The status sequence is not repeated.
+- The compact protocol version matches the ECU-supported version.
+- The status sequence is coherent. Repeated/stuck frames and sequence jumps block torque until a coherent next status frame is received.
 
-If compact status has not been seen yet, ECU falls back to the legacy stale check for old bench firmware only.
+Legacy `0x069` frames are still decoded for bench visibility and old logs, but they are no longer sufficient to allow torque. ECU torque gating requires the compact `0x680` status frame.

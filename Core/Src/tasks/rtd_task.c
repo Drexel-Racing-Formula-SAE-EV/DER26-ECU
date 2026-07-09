@@ -11,9 +11,9 @@
 
 #include "tasks/rtd_task.h"
 #include "main.h"
+#include "ext_drivers/ecu_safety.h"
 
 #define TRIP_DELAY 100u
-#define RTD_BUZZ_TIME_MS 3000u
 
 /**
 * @brief Actual RTD task function
@@ -21,30 +21,6 @@
 * @param arg App_data struct pointer converted to void pointer
 */
 void rtd_task_fn(void *arg);
-
-static bool rtd_faults_clear(const app_data_t *data)
-{
-    return !(data->hard_fault ||
-             data->apps_fault ||
-             data->bse_fault ||
-             data->bppc_fault ||
-             data->ams_fault ||
-             data->canbus_fault ||
-             data->canbus_rx_fault ||
-             data->canbus_tx_fault ||
-             data->imd_fail ||
-             data->bms_fail ||
-             data->bspd_fail);
-}
-
-static bool rtd_conditions_met(const app_data_t *data)
-{
-    return (data->tsal &&
-            data->cascadia_ok &&
-            data->brakelight &&
-            data->rtd_button &&
-            rtd_faults_clear(data));
-}
 
 TaskHandle_t rtd_task_start(app_data_t *data)
 {
@@ -78,87 +54,39 @@ void rtd_task_fn(void *arg)
         data->rtd_button = !HAL_GPIO_ReadPin(RTD_Go_GPIO_Port, RTD_Go_Pin);
         data->cascadia_ok = !HAL_GPIO_ReadPin(MTR_Ok_GPIO_Port, MTR_Ok_Pin);
 
-        /* state machine (as described in Teams -> Electrical - Firmware -> Files -> RTD_FSM.pptx) */
-        switch(data->rtd_mode)
+        const ecu_rtd_inputs_t inputs = {
+            .tsal = data->tsal,
+            .rtd_button = data->rtd_button,
+            .cascadia_ok = data->cascadia_ok,
+            .brakelight = data->brakelight,
+            .faults = {
+                .hard_fault = data->hard_fault,
+                .apps_fault = data->apps_fault,
+                .bse_fault = data->bse_fault,
+                .bppc_fault = data->bppc_fault,
+                .ams_fault = data->ams_fault,
+                .canbus_fault = data->canbus_fault,
+                .canbus_rx_fault = data->canbus_rx_fault,
+                .canbus_tx_fault = data->canbus_tx_fault,
+                .imd_fail = data->imd_fail,
+                .bms_fail = data->bms_fail,
+                .bspd_fail = data->bspd_fail,
+            },
+        };
+
+        const ecu_rtd_step_t step = ecu_rtd_step(data->rtd_mode, buzz_start_tick, &inputs, entry);
+        data->rtd_mode = step.state;
+        buzz_start_tick = step.buzz_start_tick;
+        set_buzzer(step.buzzer_on);
+
+        if(step.trip_pulse_requested)
         {
-            case RTD_AWAIT_TSAL:
-                set_buzzer(false);
-                if(data->tsal)
-                {
-                    data->rtd_mode = RTD_AWAIT_BUTTON_FALSE;
-                }
-                break;
-
-            case RTD_AWAIT_BUTTON_FALSE:
-                set_buzzer(false);
-                if(!data->tsal)
-                {
-                    data->rtd_mode = RTD_AWAIT_TSAL;
-                }
-                else if(!data->rtd_button)
-                {
-                    data->rtd_mode = RTD_AWAIT_CONDITIONS;
-                }
-                break;
-
-            case RTD_AWAIT_CONDITIONS:
-                set_buzzer(false);
-                if(!data->tsal)
-                {
-                    data->rtd_mode = RTD_AWAIT_TSAL;
-                }
-                else if(rtd_conditions_met(data))
-                {
-                    set_buzzer(true);
-                    buzz_start_tick = entry;
-                    data->rtd_mode = RTD_BUZZING;
-                }
-                break;
-
-            case RTD_BUZZING:
-                if(!data->tsal)
-                {
-                    set_buzzer(false);
-                    data->rtd_mode = RTD_AWAIT_TSAL;
-                }
-                else if(!rtd_conditions_met(data))
-                {
-                    set_buzzer(false);
-                    data->rtd_mode = RTD_AWAIT_CONDITIONS;
-                }
-                else if((uint32_t)(entry - buzz_start_tick) >= RTD_BUZZ_TIME_MS)
-                {
-                    set_buzzer(false);
-                    data->rtd_mode = RTD_ENABLED;
-                }
-                break;
-
-            case RTD_ENABLED:
-                if(!data->tsal)
-                {
-                    data->rtd_mode = RTD_AWAIT_TSAL;
-                }
-                else if(!data->cascadia_ok || !data->rtd_button || !rtd_faults_clear(data))
-                {
-                    data->rtd_mode = RTD_AWAIT_CONDITIONS;
-                }
-
-                /* For any state transition out of RTD_ENABLED without a hard fault. */
-                if(data->rtd_mode != RTD_ENABLED)
-                {
-                    set_buzzer(false);
-                    override_ecu_ok(false);
-                    apply_ecu_ok_override(true);
-                    osDelay(TRIP_DELAY);
-                    apply_ecu_ok_override(false);
-                }
-                break;
-
-            default:
-                set_buzzer(false);
-                data->rtd_mode = RTD_AWAIT_TSAL;
-                break;
+            override_ecu_ok(false);
+            apply_ecu_ok_override(true);
+            osDelay(TRIP_DELAY);
+            apply_ecu_ok_override(false);
         }
+
         osDelayUntil(entry + (1000 / RTD_FREQ));
     }
 }

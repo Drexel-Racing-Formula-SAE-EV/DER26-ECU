@@ -59,6 +59,12 @@ jobs:
       - name: Run ECU host regression tests
         working-directory: host_tests
         run: make CC=gcc test | tee host_test_output.txt
+      - name: Run ECU system SIL tests
+        working-directory: host_tests
+        run: make CC=gcc system-sil | tee system_sil_output.txt
+      - name: Run ECU sanitizer tests
+        working-directory: host_tests
+        run: make CC=gcc asan
       - name: Run GCC analyzer
         working-directory: host_tests
         run: make CC=gcc analyze
@@ -70,6 +76,8 @@ jobs:
           test -f unit_test_output.txt && cat unit_test_output.txt || true
           echo "===== host_test_output.txt ====="
           test -f host_test_output.txt && cat host_test_output.txt || true
+          echo "===== system_sil_output.txt ====="
+          test -f system_sil_output.txt && cat system_sil_output.txt || true
 
   stm32-headless-build:
     name: STM32 headless ARM-GCC build
