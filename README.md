@@ -1,69 +1,79 @@
-# DER26 ECU Firmware v2.3.0
+# DER26 ECU Firmware v2.4.0
 
-STM32F767ZI / FreeRTOS firmware for the DER26 vehicle ECU. This revision is a safety-focused integration update based on the current AMS compact CAN contract, CM200 controller manual, ECU/MCU-breakout schematics, shutdown design, and standalone BPSD design.
+STM32F767ZI / FreeRTOS firmware for the DER26 vehicle ECU. Version 2.4 adds supervised CM200 feedback, closes stale-command and RTD state-machine defects, strengthens AMS/CAN validation, and expands bring-up diagnostics while preserving the output-inhibited default.
 
-## Read this before building
+## Build locks
 
-The default build is a **bench profile**. It runs sensing, CAN, diagnostics, and host-tested safety logic, but it holds `Firmware_Ok`, `MTR_EN`, `Cascadia_ON`, and nonzero torque requests inhibited.
+Debug, Release, and headless builds default to the bench profile:
 
 ```text
 ECU_BUILD_PROFILE=0
 ```
 
-The vehicle profile is intentionally compile-locked until the BPSD output has a validated protected interface to PE13:
+It runs sensing, CAN decoding, command generation, CLI, and safety logic, but holds `Firmware_Ok`, `MTR_EN`, `Cascadia_ON`, and enabled/nonzero torque commands inhibited.
+
+A vehicle build requires all three symbols:
 
 ```text
 ECU_BUILD_PROFILE=1
 ECU_BSPD_INTERFACE_3V3_VALIDATED=1
+ECU_CM200_CAN_CONTRACT_VALIDATED=1
 ```
 
-The BPSD board exports a nominal 12 V active-high `BSPD Ok` signal. The MCU breakout schematic shows PE13 connected without a level shifter. **Never connect that 12 V output directly to PE13.** Use an approved fail-low 3.3 V interface, validate it electrically, then set the acknowledgement symbol. See [BSPD interface and test plan](Core/docs/BSPD_INTERFACE_AND_TEST_PLAN.md).
+The BPSD board exports a nominal 12 V active-high `BSPD Ok` signal, while PE13 is a 3.3 V input with no shown level conversion. Never connect that output directly to PE13. The second acknowledgement requires measured CM200 IDs, rates, command mode, rolling-counter behavior, and required broadcasts. These symbols are locks, not proof of hardware validation.
 
-CubeIDE Debug and Release configurations explicitly default to `ECU_BUILD_PROFILE=0`. Perform a full clean build after changing profiles. The headless build accepts the same values as environment variables.
+## Safety behavior
 
-## Key safety behavior
+- Critical outputs initialize low and are forced low by HAL fatal errors, CPU exceptions, RTOS assertion/allocation/stack failures, and watchdog reset.
+- The error supervisor is the only runtime owner of `Firmware_Ok`, `MTR_EN`, and `Cascadia_ON`.
+- Vehicle builds use an independent watchdog; APPS, BSE, BPPC, RTD, CAN, and cooling task heartbeats are supervised.
+- BMS, IMD, BPSD, motor-fault, TSAL, and motor-OK signals fail closed. Fault assertion is immediate; the principal discrete fault inputs require 250 ms of healthy samples to recover.
+- RTD requires TS active, brake applied, healthy controller/safety state, one observed button release, and a new deliberate button press. An early/held press is consumed. The momentary button may be released during the 2 s sound and is not required to remain held after RTD.
+- Any RTD gate loss disables torque and requires a new release/press cycle; it cannot automatically re-enter RTD from a held button.
+- CLI was moved below safety-control priorities so blocking UART diagnostics cannot starve RTD, CAN, APPS, BSE, or the error supervisor.
 
-- All shutdown and inverter-control outputs initialize low.
-- FreeRTOS stack overflow, allocation failure, `configASSERT`, HAL fatal error, NMI, HardFault, MemManage, BusFault, and UsageFault paths force critical outputs low.
-- The error task is the sole runtime owner of `Firmware_Ok`, `MTR_EN`, and `Cascadia_ON`.
-- Vehicle builds use an approximately 2 s independent watchdog. Only the error supervisor refreshes it.
-- APPS, BSE, BPPC, RTD, and CAN task heartbeats are supervised.
-- Discrete faults assert immediately and require five healthy 20 Hz samples before clearing.
-- PE13 is decoded as active-high `BSPD_OK`, not active-high failure. Its pull-down makes a disconnected protected interface fail closed.
-- BMS fail, IMD fail, motor fault, and motor-OK inputs use fail-closed pull configuration matching their configured polarity.
-- RTD loss requests a 100 ms firmware-shutdown pulse without allowing two tasks to race the output.
-- Sensor ADC start, channel-select, conversion, and stop failures propagate into the corresponding safety fault.
-- Brake light turns on if the dual brake-sensor path is invalid.
+## AMS supervision
 
-## AMS integration
+Torque authorization requires independently fresh `0x680`, `0x681`, and `0x682` frames, coherent status sequence, matching protocol version, BMS_OK/validity flags, zero relevant faults, and sane electrical/thermal values. A malformed required frame invalidates its last good value immediately rather than leaving it trusted until the 500 ms age timeout.
 
-New torque authorization requires all of the following:
+Electrical summaries enforce cell, pack-current, pack-voltage, and min/max plausibility bounds. Thermal summaries enforce -40 to 150 C bounds, `min <= average <= max`, and fan command no greater than 100%. Legacy `0x069` and `0x421` remain diagnostic-only and cannot authorize torque. See [ECU/AMS CAN contract](Core/docs/ECU_AMS_CAN_CONTRACT.md).
 
-- Fresh, coherent `0x680` status sequence.
-- Fresh `0x681` electrical summary and `0x682` thermal summary, each no older than 500 ms.
-- Matching compact protocol version.
-- `BMS_OK` true and inhibit/fault/invalid/heartbeat flags clear.
-- Sane min/max electrical and thermal summaries.
-- Thermal overtemperature, severe-overtemperature, and invalid/read-fault flags clear.
+## CM200 supervision
 
-Legacy `0x069` and estimator `0x421` frames remain visible for compatibility but cannot authorize torque. Details are in [the ECU/AMS CAN contract](Core/docs/ECU_AMS_CAN_CONTRACT.md).
+The ECU decodes temperatures, speed/position, currents, voltages, internal states, POST/RUN faults, torque/timer, firmware identity, and torque capability from `0x0A0` through `0x0B1`.
 
-The STM32 HAL peripheral wrappers now keep pointers to the real Cube-generated handles rather than copying them. This is essential for CAN: the receive callback now compares against the same global `hcan1` handle used by the IRQ.
+Required torque feedback is:
 
-## CM200 command behavior
+```text
+0x0A5  0x0A7  0x0AA  0x0AB  0x0AC  0x0B1
+```
 
-CAN ID `0x0C0` is emitted at 20 Hz with the manual-defined little-endian layout.
+Each required frame has a 250 ms timeout. Torque also requires:
 
-- Torque is signed and encoded in 0.1 Nm/count.
-- Five disable commands precede any enable command.
-- Disable packets retain the configured forward direction to avoid a direction-change lockout during a fault transition.
-- Byte 5 bits 4-7 carry a rolling counter.
-- The counter advances only after HAL accepts the frame for transmission.
-- CAN error warning, error-passive, bus-off, last-error-code, and FIFO-overrun conditions are recorded and fail the torque gate.
+- CAN torque mode and no enable lockout;
+- zero POST and RUN fault words;
+- correlated and progressing inverter expected counter;
+- current/previous command echo agreement;
+- advancing power-on timer with reset/replay detection;
+- VSM Ready or Motor Running state and forward direction;
+- fresh positive motoring capability.
 
-## CLI
+CM200 commands now run at 100 Hz. Positive torque is limited by the `0x0B1` capability and calibrated 200 Nm ceiling, with a positive-torque slew limiter. Every fault or inhibit bypasses the down-slew and sends immediate zero/disable. The one-slot transmit mailbox replaces an unsent old request, eliminating FIFO delivery of stale positive torque after a newer disable.
 
-UART CLI commands relevant to bring-up:
+The controller is powered in stages so feedback can start without creating a shutdown/precharge deadlock. Communication health permits `Firmware_OK`; VSM Ready/Running remains mandatory for RTD and torque. Missing startup feedback and runtime feedback/integrity failures are reset-required latches. Details and the EEPROM/test contract are in [CM200 CAN contract and bring-up](Core/docs/CM200_CAN_CONTRACT_AND_BRINGUP.md).
+
+## CAN hardening
+
+- bxCAN hardware list filters admit only the supported AMS and CM200 standard data IDs.
+- Remote frames are rejected again in software.
+- The RX ISR drains a bounded batch instead of one frame per callback.
+- Valid, ignored, malformed, remote, FIFO-overrun, recovery, replaced-command, and dropped-command counts are retained.
+- Protocol-specific invalidation prevents one valid subsystem frame from clearing another subsystem's malformed/stale state.
+- Command counters advance only after HAL accepts the frame.
+
+## Diagnostics
+
+Useful UART commands:
 
 ```text
 ver
@@ -73,12 +83,14 @@ sd
 bspd
 ams
 can
+cm200
+tasks
 throttle
 brake
 brakelight
 ```
 
-`ver` prints the active build profile, output-inhibit state, and BPSD-interface acknowledgement. Check this banner after every flash.
+`ver` prints all build locks. `cm200` reports freshness, states, integrity, fault words, torque capability, firmware identity, temperatures, and a diagnostic AMS-pack/DC-bus voltage comparison. `tasks` reports stack high-water marks.
 
 ## Build and validation
 
@@ -89,6 +101,7 @@ cd host_tests
 make CC=gcc clean
 make CC=gcc ci
 make CC=gcc asan
+make CC=gcc ubsan
 make CC=gcc stress
 ```
 
@@ -98,19 +111,15 @@ Bench ARM build:
 ECU_BUILD_PROFILE=0 bash ci/stm32/build_ecu_headless_gcc.sh
 ```
 
-Vehicle ARM build, only after the BPSD interface is validated:
+Vehicle ARM build, only after both hardware contracts are closed:
 
 ```bash
 ECU_BUILD_PROFILE=1 \
 ECU_BSPD_INTERFACE_3V3_VALIDATED=1 \
+ECU_CM200_CAN_CONTRACT_VALIDATED=1 \
 bash ci/stm32/build_ecu_headless_gcc.sh
 ```
 
-The current environment used for this revision did not contain `arm-none-eabi-gcc`; both bench and vehicle source profiles were still checked with strict full-application C syntax passes. Build and inspect the actual ELF/map in CubeIDE or CI before flashing.
+This revision environment does not provide `arm-none-eabi-gcc`, so a clean team-toolchain target build, map review, flash, and staged hardware validation remain mandatory. Follow [ECU hardware bring-up](Core/docs/ECU_HARDWARE_BRINGUP.md) and [BPSD interface test plan](Core/docs/BSPD_INTERFACE_AND_TEST_PLAN.md).
 
-## Hardware validation status
-
-Firmware logic and host fault injection do not prove PCB polarity, voltage levels, ADC calibration, real CAN timing, watchdog reset timing, braking behavior, or inverter behavior. The default profile remains output-inhibited for that reason.
-
-Use [the hardware bring-up guide](Core/docs/ECU_HARDWARE_BRINGUP.md) and close every gate before changing to the vehicle profile. Coolant thermocouple conversion remains uncalibrated; the firmware reports its temperature telemetry invalid and commands the pump to 100% rather than presenting sensor voltage as degrees Celsius.
-
+Coolant temperature conversion and protection thresholds remain uncalibrated. The firmware reports that telemetry invalid and commands the cooling pump to 100% rather than presenting sensor voltage as temperature.

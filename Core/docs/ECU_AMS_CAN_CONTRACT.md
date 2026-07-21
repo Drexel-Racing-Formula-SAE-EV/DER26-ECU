@@ -32,6 +32,8 @@ Do **not** treat byte 4 bit 3 as firmware-validated IMD health yet. For this sta
 | 4-5 | Minimum cell voltage, mV. |
 | 6-7 | Maximum cell voltage, mV. |
 
+The ECU treats these as plausible only when cells are within 500-5000 mV, minimum is no greater than maximum, pack voltage is no greater than 1000.0 V, and pack current is within -1000.0 to +1000.0 A. These are corruption/data-integrity bounds, not substitutes for AMS trip thresholds.
+
 ### `0x682` — Thermal summary
 
 | Bytes | Meaning |
@@ -41,6 +43,8 @@ Do **not** treat byte 4 bit 3 as firmware-validated IMD health yet. For this sta
 | 4-5 | Average/filtered temperature, signed, 0.1 C/count. |
 | 6 | Maximum fan command percent. |
 | 7 | Thermal/fan flags. |
+
+The ECU requires all three temperatures within -40.0 to 150.0 C, `minimum <= average <= maximum`, and fan command 0-100%.
 
 Byte 7 is decoded as follows:
 
@@ -68,6 +72,8 @@ Byte 7 is decoded as follows:
 | 6 | Usable cell count. |
 | 7 | Usable temperature-sensor count. |
 
+Location/count fields are range-checked against five segments, 15 cells per segment, 17 temperature channels per segment, 75 total cells, and 85 total temperature channels. This health frame remains diagnostic rather than a required torque-authority heartbeat.
+
 ## Legacy frames kept for bench compatibility
 
 `0x069` is the older paged AMS telemetry. It carries state, AIR state, current, IMD legacy fields, min/max voltage, per-segment cell voltages, per-segment temperatures, and fans over packet headers 0-61.
@@ -89,6 +95,9 @@ The ECU sets `ams_fault` from `ams_allows_torque()`. With compact status availab
 - The compact protocol version matches the ECU-supported version.
 - The status sequence is coherent. Repeated/stuck frames and sequence jumps block torque until a coherent next status frame is received.
 - Electrical `min_cell <= max_cell`, thermal `min_temp <= max_temp`, and fan command is 0-100%.
+- Electrical/thermal physical-plausibility envelopes and thermal average ordering pass.
 - Thermal bits 4, 5, and 7 are clear.
+
+Wrong DLC, non-standard format, null/missing data, or a remote frame for a required compact ID immediately invalidates that frame's last good state. The ECU does not continue trusting an earlier payload until its former 500 ms timeout.
 
 Legacy `0x069` frames are still decoded for bench visibility and old logs, but they are no longer sufficient to allow torque. ECU torque gating requires the compact `0x680` status frame.

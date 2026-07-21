@@ -17,6 +17,7 @@
 
 #define BV2000_350_PPL 750
 #define ADC3_MUTEX_TIMEOUT_MS 10u
+#define COOLANT_FLOW_STALE_TIMEOUT_MS 1000u
 
 /**
 * @brief Actual COOL task function
@@ -68,6 +69,7 @@ void cool_task_fn(void *arg)
     for(;;)
     {
         entry = osKernelGetTickCount();
+        data->cool_heartbeat_tick = entry;
 
         /* TODO: Finish calibrating coolant sensors. ADC3 is shared with brake sensors, so this block is mutexed. */
         if(osMutexAcquire(data->board.stm32f767.adc3_mutex, ADC3_MUTEX_TIMEOUT_MS) == osOK)
@@ -118,7 +120,11 @@ void cool_task_fn(void *arg)
             data->coolant_fault = (adc_mutex_failures >= 3u);
         }
 
-        data->coolant_flow = BV2000_350_convert(flow->freq);
+        taskENTER_CRITICAL();
+        flow_sensor_update_stale(flow, entry, COOLANT_FLOW_STALE_TIMEOUT_MS);
+        const float flow_frequency = flow->freq;
+        taskEXIT_CRITICAL();
+        data->coolant_flow = BV2000_350_convert(flow_frequency);
 
         /* Fail toward maximum coolant circulation until control calibration is closed. */
         pwm_set_percent(pump, ECU_COOLANT_PUMP_DEFAULT_PERCENT);

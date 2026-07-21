@@ -35,6 +35,8 @@ int get_faults(int argc, char *argv[]);
 int get_status(int argc, char *argv[]);
 int get_ams_status(int argc, char *argv[]);
 int get_can_status(int argc, char *argv[]);
+int get_cm200_status(int argc, char *argv[]);
+int get_task_status(int argc, char *argv[]);
 int get_bspd_status(int argc, char *argv[]);
 int ssa(int argc, char *argv[]);
 int sd(int argc, char *argv[]);
@@ -50,6 +52,8 @@ command_t cmds[] =
 	{"status", &get_status, "critical ECU state and output summary"},
 	{"ams", &get_ams_status, "AMS compact-frame safety status"},
 	{"can", &get_can_status, "CAN error and CM200 counter status"},
+	{"cm200", &get_cm200_status, "CM200 broadcasts, freshness, faults, and command integrity"},
+	{"tasks", &get_task_status, "task stack high-water marks in words"},
 	{"bspd", &get_bspd_status, "BSPD raw-OK and decoded fault status"},
 	{"throttle", &get_throttle, "get the throttle percentage"},
 	{"brakelight", &get_brakelight, "get the brake light status"},
@@ -168,10 +172,11 @@ int id(int argc, char *argv[])
 {
     snprintf(outline, CLI_LINESZ, "DER ECU FW V%d.%d.%d", VER_MAJOR, VER_MINOR, VER_BUG);
 	cli_printline(cli, outline);
-	snprintf(outline, CLI_LINESZ, "profile:%s outputs_inhibited:%u bspd_3v3_validated:%u",
+	snprintf(outline, CLI_LINESZ, "profile:%s inhibited:%u bspd_3v3:%u cm200_contract:%u",
 	         (ECU_BUILD_PROFILE == ECU_BUILD_PROFILE_VEHICLE) ? "vehicle" : "bench",
 	         (unsigned)ECU_OUTPUTS_INHIBITED,
-	         (unsigned)ECU_BSPD_INTERFACE_3V3_VALIDATED);
+	         (unsigned)ECU_BSPD_INTERFACE_3V3_VALIDATED,
+	         (unsigned)ECU_CM200_CAN_CONTRACT_VALIDATED);
 	cli_printline(cli, outline);
 	snprintf(outline, CLI_LINESZ, "reset_cause:0x%08lX watchdog:%u",
 	         (unsigned long)data->reset_cause, (unsigned)ECU_ENABLE_IWDG);
@@ -184,10 +189,11 @@ int get_status(int argc, char *argv[])
 	(void)argc;
 	(void)argv;
 	snprintf(outline, CLI_LINESZ,
-	         "RTD:%u torque:%d brake:%d hard:%u soft:%u startup:%u hb:%u",
+	         "RTD:%u throttle:%d brake:%d hard:%u soft:%u startup:%u hb:%u cm:%u",
 	         (unsigned)data->rtd_mode, data->throttle, data->brake,
 	         (unsigned)data->hard_fault, (unsigned)data->soft_fault,
-	         (unsigned)data->startup_fault, (unsigned)data->task_heartbeat_fault);
+	         (unsigned)data->startup_fault, (unsigned)data->task_heartbeat_fault,
+	         (unsigned)data->cm200_fault);
 	cli_printline(cli, outline);
 	snprintf(outline, CLI_LINESZ,
 	         "OUT fw_ok:%u mtr_en:%u mtr_on:%u inhibited:%u",
@@ -239,17 +245,154 @@ int get_can_status(int argc, char *argv[])
 	(void)argc;
 	(void)argv;
 	snprintf(outline, CLI_LINESZ,
-	         "CAN fault:%u rx:%u tx:%u hw:%u err:0x%08lX",
+	         "CAN fault:%u rx:%u tx:%u hw:%u filters:%u err:0x%08lX",
 	         (unsigned)data->canbus_fault, (unsigned)data->canbus_rx_fault,
 	         (unsigned)data->canbus_tx_fault, (unsigned)data->canbus_hw_fault,
+	         (unsigned)data->board.canbus.filters_configured,
 	         (unsigned long)data->can_error_code);
 	cli_printline(cli, outline);
 	snprintf(outline, CLI_LINESZ,
-	         "CAN dropped:%lu overruns:%lu recoveries:%lu cm_counter:%u",
+	         "CAN tx_drop:%lu replaced:%lu overruns:%lu recoveries:%lu cm_ctr:%u",
 	         (unsigned long)data->board.canbus.tx_dropped_count,
+	         (unsigned long)data->board.canbus.tx_replaced_count,
 	         (unsigned long)data->can_rx_overrun_count,
 	         (unsigned long)data->can_recovery_count,
 	         (unsigned)data->cm200_rolling_counter);
+	cli_printline(cli, outline);
+	snprintf(outline, CLI_LINESZ,
+	         "CAN rx_ok:%lu ignored:%lu malformed:%lu remote:%lu",
+	         (unsigned long)data->board.canbus.rx_accepted_count,
+	         (unsigned long)data->board.canbus.rx_ignored_count,
+	         (unsigned long)data->board.canbus.rx_malformed_count,
+	         (unsigned long)data->board.canbus.rx_remote_count);
+	cli_printline(cli, outline);
+	return 0;
+}
+
+int get_cm200_status(int argc, char *argv[])
+{
+	cm200_t snap;
+	ams_t ams_snap;
+	(void)argc;
+	(void)argv;
+
+	taskENTER_CRITICAL();
+	memcpy(&snap, &data->board.cm200, sizeof(snap));
+	memcpy(&ams_snap, &data->board.ams, sizeof(ams_snap));
+	taskEXIT_CRITICAL();
+
+	snprintf(outline, CLI_LINESZ,
+	         "CM feedback:%u torque_ready:%u fault:%u seen:%u latch S/R:%u/%u",
+	         (unsigned)cm200_feedback_healthy(&snap),
+	         (unsigned)cm200_allows_torque(&snap),
+	         (unsigned)data->cm200_fault,
+	         (unsigned)data->cm200_feedback_seen,
+	         (unsigned)data->cm200_startup_timeout,
+	         (unsigned)data->cm200_runtime_fault_latched);
+	cli_printline(cli, outline);
+	snprintf(outline, CLI_LINESZ,
+	         "CM fresh A5/A7/AA/AB/AC/B1:%u/%u/%u/%u/%u/%u",
+	         (unsigned)!snap.frame[CM200_FRAME_MOTOR_POSITION].stale,
+	         (unsigned)!snap.frame[CM200_FRAME_VOLTAGE].stale,
+	         (unsigned)!snap.frame[CM200_FRAME_INTERNAL_STATES].stale,
+	         (unsigned)!snap.frame[CM200_FRAME_FAULTS].stale,
+	         (unsigned)!snap.frame[CM200_FRAME_TORQUE_TIMER].stale,
+	         (unsigned)!snap.frame[CM200_FRAME_TORQUE_CAPABILITY].stale);
+	cli_printline(cli, outline);
+	snprintf(outline, CLI_LINESZ,
+	         "CM bus:%ddV AMS:%udV delta:%ddV check:%u mismatch:%u",
+	         (int)snap.dc_bus_voltage_0p1v,
+	         (unsigned)ams_snap.pack_voltage_0p1v,
+	         (int)data->ams_cm200_voltage_delta_0p1v,
+	         (unsigned)data->ams_cm200_voltage_crosscheck_valid,
+	         (unsigned)data->ams_cm200_voltage_mismatch);
+	cli_printline(cli, outline);
+	snprintf(outline, CLI_LINESZ,
+	         "CM speed:%drpm torque cmd/fb/cap:%d/%d/%d dNm",
+	         (int)snap.motor_speed_rpm,
+	         (int)snap.commanded_torque_0p1nm,
+	         (int)snap.torque_feedback_0p1nm,
+	         (int)snap.motor_torque_available_0p1nm);
+	cli_printline(cli, outline);
+	snprintf(outline, CLI_LINESZ,
+	         "CM VSM:%u INV:%u CAN:%u torque_mode:%u lockout:%u enabled:%u",
+	         (unsigned)snap.vsm_state,
+	         (unsigned)snap.inverter_state,
+	         (unsigned)snap.command_mode_can,
+	         (unsigned)snap.torque_mode,
+	         (unsigned)snap.inverter_enable_lockout,
+	         (unsigned)snap.inverter_enabled);
+	cli_printline(cli, outline);
+	snprintf(outline, CLI_LINESZ,
+	         "CM states mode:%02X enable:%02X limits:%02X BMS_active:%u",
+	         (unsigned)snap.mode_states,
+	         (unsigned)snap.enable_states,
+	         (unsigned)snap.limit_states,
+	         (unsigned)snap.bms_active);
+	cli_printline(cli, outline);
+	snprintf(outline, CLI_LINESZ,
+	         "CM counter ecu/expected:%u/%u sync:%u mism:%u echo:%u mism:%u",
+	         (unsigned)snap.last_command_counter,
+	         (unsigned)snap.inverter_expected_counter,
+	         (unsigned)snap.counter_synced,
+	         (unsigned)snap.counter_mismatch_count,
+	         (unsigned)snap.torque_echo_synced,
+	         (unsigned)snap.torque_echo_mismatch_count);
+	cli_printline(cli, outline);
+	snprintf(outline, CLI_LINESZ,
+	         "CM faults POST:0x%08lX RUN:0x%08lX timer:%lu timer_fault:%u",
+	         (unsigned long)snap.post_faults,
+	         (unsigned long)snap.run_faults,
+	         (unsigned long)snap.power_on_timer,
+	         (unsigned)snap.timer_reset_fault);
+	cli_printline(cli, outline);
+	snprintf(outline, CLI_LINESZ,
+	         "CM temp dC modules:%d/%d/%d coolant:%d motor:%d inv_hot:%d",
+	         (int)snap.module_a_temp_0p1c,
+	         (int)snap.module_b_temp_0p1c,
+	         (int)snap.module_c_temp_0p1c,
+	         (int)snap.coolant_temp_0p1c,
+	         (int)snap.motor_temp_0p1c,
+	         (int)snap.inverter_hotspot_temp_0p1c);
+	cli_printline(cli, outline);
+	snprintf(outline, CLI_LINESZ,
+	         "CM firmware project:%04X sw:%04X date:%04X/%u valid:%u",
+	         (unsigned)snap.eeprom_project_code,
+	         (unsigned)snap.software_version,
+	         (unsigned)snap.date_mmdd,
+	         (unsigned)snap.date_year,
+	         (unsigned)snap.frame[CM200_FRAME_FIRMWARE].valid);
+	cli_printline(cli, outline);
+	return 0;
+}
+
+static unsigned long task_stack_words(TaskHandle_t task)
+{
+    return (task == NULL) ? 0u : (unsigned long)uxTaskGetStackHighWaterMark(task);
+}
+
+int get_task_status(int argc, char *argv[])
+{
+	(void)argc;
+	(void)argv;
+	snprintf(outline, CLI_LINESZ,
+	         "STACK words err:%lu can:%lu rtd:%lu apps:%lu",
+	         task_stack_words(data->error_task),
+	         task_stack_words(data->canbus_task),
+	         task_stack_words(data->rtd_task),
+	         task_stack_words(data->apps_task));
+	cli_printline(cli, outline);
+	snprintf(outline, CLI_LINESZ,
+	         "STACK words bse:%lu bppc:%lu cool:%lu cli:%lu",
+	         task_stack_words(data->bse_task),
+	         task_stack_words(data->bppc_task),
+	         task_stack_words(data->cool_task),
+	         task_stack_words(data->cli_task));
+	cli_printline(cli, outline);
+	snprintf(outline, CLI_LINESZ,
+	         "STACK words acc:%lu dash:%lu",
+	         task_stack_words(data->acc_task),
+	         task_stack_words(data->dashboard_task));
 	cli_printline(cli, outline);
 	return 0;
 }
@@ -370,6 +513,8 @@ int get_faults(int argc, char *argv[])
 	snprintf(outline, CLI_LINESZ, "    rx:    %d", data->canbus_rx_fault);
 	cli_printline(cli, outline);
 	snprintf(outline, CLI_LINESZ, "    tx:    %d", data->canbus_tx_fault);
+	cli_printline(cli, outline);
+	snprintf(outline, CLI_LINESZ, "  cm200:   %d", data->cm200_fault);
 	cli_printline(cli, outline);
 	snprintf(outline, CLI_LINESZ, "  dash:    %d", data->dashboard_fault);
 	cli_printline(cli, outline);

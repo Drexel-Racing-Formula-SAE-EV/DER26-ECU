@@ -21,11 +21,11 @@
 #define MAXTOKS (CLI_LINESZ / 2)
 
 typedef struct {
-    uint8_t c;
-    unsigned int index;
+	volatile uint8_t c;
+	volatile unsigned int index;
 	UART_HandleTypeDef *huart;
-    bool msg_pending;
-    unsigned int msg_count;
+	volatile bool msg_pending;
+	volatile unsigned int msg_count;
     unsigned int msg_proc;
     unsigned int msg_valid;
     char line[CLI_LINESZ];

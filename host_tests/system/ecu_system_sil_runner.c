@@ -7,6 +7,7 @@
  */
 
 #include "ext_drivers/ams.h"
+#include "ext_drivers/cm200.h"
 #include "ext_drivers/ecu_safety.h"
 #include "ecu_config.h"
 
@@ -333,21 +334,34 @@ static void test_rtd_state_machine_fault_injection(void)
     EXPECT_EQ_U8(step.state, RTD_BUZZING);
     EXPECT_TRUE(step.buzzer_on);
 
+    /* The dedicated RTD control is momentary; releasing it must not cancel the
+     * sound or later drop Ready-to-Drive mode. */
+    in.rtd_button = false;
+    step = ecu_rtd_step(step.state, buzz, &in, buzz + 500u);
+    EXPECT_EQ_U8(step.state, RTD_BUZZING);
+
     in.faults.ams_fault = true;
     step = ecu_rtd_step(step.state, buzz, &in, buzz + 1000u);
-    EXPECT_EQ_U8(step.state, RTD_AWAIT_CONDITIONS);
+    EXPECT_EQ_U8(step.state, RTD_AWAIT_BUTTON_FALSE);
     EXPECT_FALSE(step.buzzer_on);
     EXPECT_FALSE(step.trip_pulse_requested);
 
     in.faults.ams_fault = false;
-    step = ecu_rtd_step(step.state, step.buzz_start_tick, &in, 5000u);
+    step = ecu_rtd_step(step.state, step.buzz_start_tick, &in, 1100u);
+    EXPECT_EQ_U8(step.state, RTD_AWAIT_CONDITIONS);
+    in.rtd_button = true;
+    step = ecu_rtd_step(step.state, step.buzz_start_tick, &in, 1200u);
     EXPECT_EQ_U8(step.state, RTD_BUZZING);
-    step = ecu_rtd_step(step.state, step.buzz_start_tick, &in, 8000u);
+    in.rtd_button = false;
+    step = ecu_rtd_step(step.state, step.buzz_start_tick, &in, 4200u);
     EXPECT_EQ_U8(step.state, RTD_ENABLED);
     EXPECT_FALSE(step.buzzer_on);
 
+    step = ecu_rtd_step(step.state, step.buzz_start_tick, &in, 4300u);
+    EXPECT_EQ_U8(step.state, RTD_ENABLED);
+
     in.tsal = false;
-    step = ecu_rtd_step(step.state, step.buzz_start_tick, &in, 8100u);
+    step = ecu_rtd_step(step.state, step.buzz_start_tick, &in, 4400u);
     EXPECT_EQ_U8(step.state, RTD_AWAIT_TSAL);
     EXPECT_TRUE(step.trip_pulse_requested);
 }
@@ -365,6 +379,25 @@ static void test_rtd_wraparound_buzz_timer(void)
     EXPECT_EQ_U8(step.state, RTD_BUZZING);
     step = ecu_rtd_step(step.state, step.buzz_start_tick, &in, start + ECU_RTD_BUZZ_TIME_MS);
     EXPECT_EQ_U8(step.state, RTD_ENABLED);
+}
+
+static void test_rtd_early_or_stuck_press_cannot_auto_arm(void)
+{
+    ecu_rtd_inputs_t in = rtd_good_inputs();
+    ecu_rtd_step_t step;
+
+    in.brakelight = false;
+    step = ecu_rtd_step(RTD_AWAIT_CONDITIONS, 0u, &in, 10u);
+    EXPECT_EQ_U8(step.state, RTD_AWAIT_BUTTON_FALSE);
+    in.brakelight = true;
+    step = ecu_rtd_step(step.state, step.buzz_start_tick, &in, 20u);
+    EXPECT_EQ_U8(step.state, RTD_AWAIT_BUTTON_FALSE);
+    in.rtd_button = false;
+    step = ecu_rtd_step(step.state, step.buzz_start_tick, &in, 30u);
+    EXPECT_EQ_U8(step.state, RTD_AWAIT_CONDITIONS);
+    in.rtd_button = true;
+    step = ecu_rtd_step(step.state, step.buzz_start_tick, &in, 40u);
+    EXPECT_EQ_U8(step.state, RTD_BUZZING);
 }
 
 static void test_cm200_disable_before_enable_and_reset_on_fault(void)
@@ -395,6 +428,8 @@ static void test_cm200_disable_before_enable_and_reset_on_fault(void)
     EXPECT_EQ_U8(data[1], 0x12u);
     EXPECT_EQ_U8(data[4], 1u);
     EXPECT_EQ_U8(data[5], 1u);
+    EXPECT_TRUE(ecu_cm200_packet_enabled(data));
+    EXPECT_EQ_U32((uint16_t)ecu_cm200_packet_torque(data), 0x1234u);
 
     ecu_cm200_apply_rolling_counter(data, 0x0Au);
     EXPECT_EQ_U8(data[5], 0xA1u);
@@ -409,6 +444,106 @@ static void test_cm200_disable_before_enable_and_reset_on_fault(void)
     ecu_cm200_build_torque_packet(data, -100);
     EXPECT_EQ_U8(data[0], 0x9Cu);
     EXPECT_EQ_U8(data[1], 0xFFu);
+    EXPECT_EQ_U32((uint16_t)ecu_cm200_packet_torque(data), (uint16_t)-100);
+}
+
+static void test_cm200_supervisor_startup_runtime_and_wraparound(void)
+{
+    ecu_cm200_supervisor_t supervisor;
+
+    ecu_cm200_supervisor_init(&supervisor);
+    EXPECT_TRUE(ecu_cm200_supervisor_update(&supervisor, false, false, false, 0u));
+    EXPECT_FALSE(supervisor.startup_timeout_latched);
+
+    EXPECT_TRUE(ecu_cm200_supervisor_update(&supervisor, true, false, false, 100u));
+    EXPECT_FALSE(supervisor.startup_timeout_latched);
+    EXPECT_TRUE(ecu_cm200_supervisor_update(&supervisor,
+                                            true,
+                                            false,
+                                            false,
+                                            100u + ECU_CM200_STARTUP_GRACE_MS));
+    EXPECT_FALSE(supervisor.startup_timeout_latched);
+    EXPECT_TRUE(ecu_cm200_supervisor_update(&supervisor,
+                                            true,
+                                            false,
+                                            false,
+                                            101u + ECU_CM200_STARTUP_GRACE_MS));
+    EXPECT_TRUE(supervisor.startup_timeout_latched);
+
+    ecu_cm200_supervisor_init(&supervisor);
+    EXPECT_TRUE(ecu_cm200_supervisor_update(&supervisor, true, false, false, 200u));
+    EXPECT_FALSE(ecu_cm200_supervisor_update(&supervisor, true, true, false, 300u));
+    EXPECT_TRUE(supervisor.ever_ready);
+    EXPECT_TRUE(ecu_cm200_supervisor_update(&supervisor, true, false, false, 301u));
+    EXPECT_TRUE(supervisor.runtime_fault_latched);
+    EXPECT_TRUE(ecu_cm200_supervisor_update(&supervisor, false, false, false, 302u));
+    EXPECT_TRUE(supervisor.runtime_fault_latched);
+
+    ecu_cm200_supervisor_init(&supervisor);
+    EXPECT_TRUE(ecu_cm200_supervisor_update(&supervisor,
+                                            true,
+                                            false,
+                                            false,
+                                            0xFFFFFF00u));
+    EXPECT_TRUE(ecu_cm200_supervisor_update(&supervisor,
+                                            true,
+                                            false,
+                                            false,
+                                            0xFFFFFF00u + ECU_CM200_STARTUP_GRACE_MS + 1u));
+    EXPECT_TRUE(supervisor.startup_timeout_latched);
+
+    ecu_cm200_supervisor_init(&supervisor);
+    EXPECT_TRUE(ecu_cm200_supervisor_update(&supervisor, true, false, true, 10u));
+    EXPECT_TRUE(supervisor.runtime_fault_latched);
+}
+
+static void test_cm200_random_frame_fuzz_cannot_create_authority(void)
+{
+    static const uint16_t ids[] = {
+        CM200_TEMPERATURES_1_CAN_ID,
+        CM200_TEMPERATURES_2_CAN_ID,
+        CM200_TEMPERATURES_3_CAN_ID,
+        CM200_MOTOR_POSITION_CAN_ID,
+        CM200_CURRENT_CAN_ID,
+        CM200_VOLTAGE_CAN_ID,
+        CM200_INTERNAL_STATES_CAN_ID,
+        CM200_FAULTS_CAN_ID,
+        CM200_TORQUE_TIMER_CAN_ID,
+        CM200_FIRMWARE_CAN_ID,
+        CM200_TORQUE_CAP_CAN_ID,
+    };
+    cm200_t cm;
+    uint8_t frame[8];
+
+    cm200_init(&cm);
+    for(uint32_t cycle = 0u; cycle < ECU_HOST_LONG_FUZZ_CYCLES; cycle++)
+    {
+        for(uint8_t i = 0u; i < sizeof(frame); i++)
+        {
+            frame[i] = (uint8_t)(rng_next() >> 24u);
+        }
+        const uint32_t pick = rng_next();
+        const uint16_t id = ids[pick % (sizeof(ids) / sizeof(ids[0]))];
+        const bool standard = ((pick & 0x20u) == 0u);
+        const uint8_t dlc = ((pick & 0x40u) == 0u) ? 8u : (uint8_t)(pick & 0x07u);
+        (void)cm200_parse_can_frame(&cm, id, standard, dlc, frame, cycle);
+        cm200_update_stale(&cm, cycle);
+
+        /* Random broadcasts without a correlated transmitted command can
+         * never manufacture torque authority. */
+        EXPECT_FALSE(cm200_feedback_healthy(&cm));
+        EXPECT_FALSE(cm200_allows_torque(&cm));
+    }
+    EXPECT_TRUE((cm.rx_count + cm.bad_rx_count) > 0u);
+}
+
+static void test_torque_slew_limiter_and_immediate_disable_path(void)
+{
+    EXPECT_EQ_U32((uint16_t)ecu_torque_slew_limit(0, 1000, 100u, 200u), 100u);
+    EXPECT_EQ_U32((uint16_t)ecu_torque_slew_limit(950, 1000, 100u, 200u), 1000u);
+    EXPECT_EQ_U32((uint16_t)ecu_torque_slew_limit(1000, 0, 100u, 200u), 800u);
+    EXPECT_EQ_U32((uint16_t)ecu_torque_slew_limit(100, -100, 100u, 500u), (uint16_t)-100);
+    EXPECT_EQ_U32((uint16_t)ecu_torque_slew_limit(123, 123, 100u, 200u), 123u);
 }
 
 static void test_bspd_semantics_and_discrete_recovery_filter(void)
@@ -457,6 +592,7 @@ static void test_torque_gate_fault_matrix(void)
         &in.imd_fail,
         &in.bms_fail,
         &in.bspd_fail,
+        &in.cm200_fault,
     };
 
     for(size_t i = 0u; i < (sizeof(faults) / sizeof(faults[0])); i++)
@@ -493,7 +629,11 @@ int main(void)
     run_test("AMS sequence fuzz stays fail-closed", test_ams_sequence_fuzz_stays_fail_closed);
     run_test("RTD state machine fault injection", test_rtd_state_machine_fault_injection);
     run_test("RTD wraparound buzz timer", test_rtd_wraparound_buzz_timer);
+    run_test("RTD early or stuck press cannot auto arm", test_rtd_early_or_stuck_press_cannot_auto_arm);
     run_test("CM200 disable before enable and reset on fault", test_cm200_disable_before_enable_and_reset_on_fault);
+    run_test("CM200 supervisor startup runtime and wraparound", test_cm200_supervisor_startup_runtime_and_wraparound);
+    run_test("CM200 random frame fuzz cannot create authority", test_cm200_random_frame_fuzz_cannot_create_authority);
+    run_test("torque slew limiter", test_torque_slew_limiter_and_immediate_disable_path);
     run_test("BSPD semantics and discrete recovery filter", test_bspd_semantics_and_discrete_recovery_filter);
     run_test("heartbeat timeout and wraparound", test_heartbeat_timeout_and_wraparound);
     run_test("torque gate fault matrix", test_torque_gate_fault_matrix);

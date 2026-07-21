@@ -16,13 +16,19 @@
 
 void cli_device_init(cli_t *dev, UART_HandleTypeDef *huart)
 {
-    dev->huart = huart;
-    dev->index = 0;
+	if(dev == NULL)
+	{
+		return;
+	}
+	dev->huart = huart;
+	dev->c = 0u;
+	dev->index = 0;
     dev->msg_pending = false;
     dev->msg_count = 0;
     dev->msg_proc = 0;
-    dev->msg_valid = 0;
-    dev->ret = 0;
+	dev->msg_valid = 0;
+	dev->ret = 0;
+	memset(dev->line, 0, sizeof(dev->line));
 }
 
 int cli_printline(cli_t *dev, char *line)

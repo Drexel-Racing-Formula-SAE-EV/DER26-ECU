@@ -1,4 +1,5 @@
 #include "ext_drivers/ams.h"
+#include "ext_drivers/cm200.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -20,6 +21,59 @@ static void put_u16_be(uint8_t *dst, uint16_t value)
 {
     dst[0] = (uint8_t)(value >> 8u);
     dst[1] = (uint8_t)(value & 0xFFu);
+}
+
+static void put_u16_le(uint8_t *dst, uint16_t value)
+{
+    dst[0] = (uint8_t)(value & 0xFFu);
+    dst[1] = (uint8_t)(value >> 8u);
+}
+
+static void put_u32_le(uint8_t *dst, uint32_t value)
+{
+    dst[0] = (uint8_t)(value & 0xFFu);
+    dst[1] = (uint8_t)((value >> 8u) & 0xFFu);
+    dst[2] = (uint8_t)((value >> 16u) & 0xFFu);
+    dst[3] = (uint8_t)((value >> 24u) & 0xFFu);
+}
+
+static void feed_cm200_required_frames(cm200_t *cm, uint8_t counter, uint32_t now_ms)
+{
+    uint8_t a5[8] = {0};
+    uint8_t a7[8] = {0};
+    uint8_t aa[8] = {0};
+    uint8_t ab[8] = {0};
+    uint8_t ac[8] = {0};
+    uint8_t b1[8] = {0};
+
+    put_u16_le(&a5[2], 1500u);
+    put_u16_le(&a7[0], 3200u);
+    aa[0] = 5u;
+    aa[2] = 1u;
+    aa[5] = (uint8_t)(((counter + 1u) & 0x0Fu) << 4u);
+    aa[7] = 0x01u;
+    put_u32_le(&ac[4], 1000u);
+    put_u16_le(&b1[0], 2000u);
+    put_u16_le(&b1[2], 1500u);
+
+    cm200_note_command_tx(cm, counter, false, 0, now_ms);
+    EXPECT_TRUE(cm200_parse_can_frame(cm, CM200_MOTOR_POSITION_CAN_ID, true, 8u, a5, now_ms));
+    EXPECT_TRUE(cm200_parse_can_frame(cm, CM200_VOLTAGE_CAN_ID, true, 8u, a7, now_ms));
+    EXPECT_TRUE(cm200_parse_can_frame(cm, CM200_INTERNAL_STATES_CAN_ID, true, 8u, aa, now_ms));
+    EXPECT_TRUE(cm200_parse_can_frame(cm, CM200_FAULTS_CAN_ID, true, 8u, ab, now_ms));
+    EXPECT_TRUE(cm200_parse_can_frame(cm, CM200_TORQUE_TIMER_CAN_ID, true, 8u, ac, now_ms));
+    EXPECT_TRUE(cm200_parse_can_frame(cm, CM200_TORQUE_CAP_CAN_ID, true, 8u, b1, now_ms));
+    cm200_note_command_tx(cm, (uint8_t)((counter + 1u) & 0x0Fu), false, 0, now_ms + 5u);
+    aa[5] = (uint8_t)(((counter + 2u) & 0x0Fu) << 4u);
+    EXPECT_TRUE(cm200_parse_can_frame(cm,
+                                      CM200_INTERNAL_STATES_CAN_ID,
+                                      true,
+                                      8u,
+                                      aa,
+                                      now_ms + 5u));
+    put_u32_le(&ac[4], 1003u);
+    EXPECT_TRUE(cm200_parse_can_frame(cm, CM200_TORQUE_TIMER_CAN_ID, true, 8u, ac, now_ms + 10u));
+    cm200_update_stale(cm, now_ms + 10u);
 }
 
 static void make_packet(uint8_t frame[8], uint16_t header, uint16_t d0, uint16_t d1, uint16_t d2)
@@ -546,6 +600,192 @@ static void test_compact_invalid_frames_rejected_without_mutation(void)
     EXPECT_EQ_U32(ams.bad_rx_count, 2u);
 }
 
+static void test_invalid_required_ams_frame_revokes_torque_immediately(void)
+{
+    ams_t ams;
+    uint8_t status[8] = {AMS_ECU_COMPACT_PROTOCOL_VERSION, 1u, 1u, 0x71u, 0u, 0u, 0u, 0u};
+    uint8_t electrical[8] = {0x0Cu, 0x80u, 0u, 0u, 0x0Bu, 0xB8u, 0x10u, 0x04u};
+
+    ams_init(&ams);
+    EXPECT_TRUE(ams_parse_can_frame(&ams, AMS_ECU_STATUS_CANBUS_ID, true, 8u, status, 10u));
+    feed_good_compact_summaries(&ams, 10u);
+    EXPECT_TRUE(ams_allows_torque(&ams));
+
+    EXPECT_FALSE(ams_parse_can_frame(&ams,
+                                     AMS_ECU_ELECTRICAL_CANBUS_ID,
+                                     true,
+                                     7u,
+                                     electrical,
+                                     11u));
+    EXPECT_FALSE(ams.compact_electrical_valid);
+    EXPECT_TRUE(ams.compact_electrical_stale);
+    EXPECT_FALSE(ams_allows_torque(&ams));
+}
+
+static void test_cm200_broadcast_decoding_and_required_gate(void)
+{
+    cm200_t cm;
+    uint8_t a0[8] = {0};
+    uint8_t a1[8] = {0};
+    uint8_t a2[8] = {0};
+    uint8_t a6[8] = {0};
+    uint8_t ae[8] = {0};
+    uint8_t aa[8] = {0};
+
+    cm200_init(&cm);
+    EXPECT_TRUE(cm.frame[CM200_FRAME_INTERNAL_STATES].stale);
+    EXPECT_TRUE(cm200_is_known_can_id(CM200_INTERNAL_STATES_CAN_ID));
+    EXPECT_FALSE(cm200_is_known_can_id(0x123u));
+
+    put_u16_le(&a0[0], 250u);
+    put_u16_le(&a0[2], (uint16_t)-100);
+    put_u16_le(&a0[4], 300u);
+    put_u16_le(&a0[6], 400u);
+    put_u16_le(&a1[0], 260u);
+    put_u16_le(&a1[2], 270u);
+    put_u16_le(&a1[4], 280u);
+    put_u16_le(&a1[6], 290u);
+    put_u16_le(&a2[0], 300u);
+    put_u16_le(&a2[2], 310u);
+    put_u16_le(&a2[4], 320u);
+    put_u16_le(&a2[6], 5u);
+    put_u16_le(&a6[0], 100u);
+    put_u16_le(&a6[2], 200u);
+    put_u16_le(&a6[4], 300u);
+    put_u16_le(&a6[6], (uint16_t)-50);
+    put_u16_le(&ae[0], 0x1234u);
+    put_u16_le(&ae[2], 0x5678u);
+    put_u16_le(&ae[4], 0x0721u);
+    put_u16_le(&ae[6], 2026u);
+
+    EXPECT_TRUE(cm200_parse_can_frame(&cm, CM200_TEMPERATURES_1_CAN_ID, true, 8u, a0, 1u));
+    EXPECT_TRUE(cm200_parse_can_frame(&cm, CM200_TEMPERATURES_2_CAN_ID, true, 8u, a1, 2u));
+    EXPECT_TRUE(cm200_parse_can_frame(&cm, CM200_TEMPERATURES_3_CAN_ID, true, 8u, a2, 3u));
+    EXPECT_TRUE(cm200_parse_can_frame(&cm, CM200_CURRENT_CAN_ID, true, 8u, a6, 4u));
+    EXPECT_TRUE(cm200_parse_can_frame(&cm, CM200_FIRMWARE_CAN_ID, true, 8u, ae, 5u));
+    EXPECT_EQ_I16(cm.module_a_temp_0p1c, 250);
+    EXPECT_EQ_I16(cm.module_b_temp_0p1c, -100);
+    EXPECT_EQ_I16(cm.dc_bus_current_0p1a, -50);
+    EXPECT_EQ_U16(cm.eeprom_project_code, 0x1234u);
+    EXPECT_EQ_U16(cm.software_version, 0x5678u);
+    EXPECT_EQ_U16(cm.date_year, 2026u);
+    EXPECT_FALSE(cm200_allows_torque(&cm));
+
+    feed_cm200_required_frames(&cm, 3u, 100u);
+    EXPECT_EQ_I16(cm.motor_speed_rpm, 1500);
+    EXPECT_EQ_I16(cm.dc_bus_voltage_0p1v, 3200);
+    EXPECT_EQ_I16(cm.motor_torque_available_0p1nm, 2000);
+    EXPECT_TRUE(cm.counter_synced);
+    EXPECT_TRUE(cm.torque_echo_synced);
+    EXPECT_TRUE(cm.timer_observed_progress);
+    EXPECT_TRUE(cm200_feedback_healthy(&cm));
+    EXPECT_TRUE(cm200_allows_torque(&cm));
+    EXPECT_EQ_I16(cm200_clamp_motoring_torque(&cm, 1500), 1500);
+    EXPECT_EQ_I16(cm200_clamp_motoring_torque(&cm, 2500), 2000);
+
+    /* Communications may be fully healthy during precharge, but VSM state 2
+     * cannot authorize RTD/torque.  This split prevents a Firmware_OK deadlock. */
+    aa[0] = 2u;
+    aa[2] = 1u;
+    aa[5] = 0x50u;
+    aa[7] = 0x01u;
+    EXPECT_TRUE(cm200_parse_can_frame(&cm, CM200_INTERNAL_STATES_CAN_ID, true, 8u, aa, 111u));
+    EXPECT_TRUE(cm200_feedback_healthy(&cm));
+    EXPECT_FALSE(cm200_allows_torque(&cm));
+    aa[0] = 5u;
+    EXPECT_TRUE(cm200_parse_can_frame(&cm, CM200_INTERNAL_STATES_CAN_ID, true, 8u, aa, 112u));
+    EXPECT_TRUE(cm200_allows_torque(&cm));
+}
+
+static void test_cm200_malformed_and_freshness_fail_closed(void)
+{
+    cm200_t cm;
+    uint8_t voltage[8] = {0};
+
+    cm200_init(&cm);
+    feed_cm200_required_frames(&cm, 1u, 100u);
+    EXPECT_TRUE(cm200_allows_torque(&cm));
+
+    put_u16_le(&voltage[0], 3200u);
+    EXPECT_FALSE(cm200_parse_can_frame(&cm,
+                                       CM200_VOLTAGE_CAN_ID,
+                                       true,
+                                       7u,
+                                       voltage,
+                                       111u));
+    EXPECT_FALSE(cm.frame[CM200_FRAME_VOLTAGE].valid);
+    EXPECT_FALSE(cm200_allows_torque(&cm));
+    EXPECT_EQ_U32(cm.bad_rx_count, 1u);
+
+    EXPECT_TRUE(cm200_parse_can_frame(&cm, CM200_VOLTAGE_CAN_ID, true, 8u, voltage, 112u));
+    cm200_update_stale(&cm, 205u);
+    EXPECT_FALSE(cm.command_tx_stale);
+    cm200_update_stale(&cm, 206u);
+    EXPECT_TRUE(cm.command_tx_stale);
+    EXPECT_FALSE(cm200_allows_torque(&cm));
+
+    cm200_note_command_tx(&cm, 2u, false, 0, 350u);
+    cm200_update_stale(&cm, 361u);
+    EXPECT_TRUE(cm.frame[CM200_FRAME_MOTOR_POSITION].stale);
+    EXPECT_FALSE(cm200_allows_torque(&cm));
+}
+
+static void test_cm200_counter_echo_fault_and_timer_reset_detection(void)
+{
+    cm200_t cm;
+    uint8_t aa[8] = {0};
+    uint8_t ac[8] = {0};
+    uint8_t ab[8] = {0};
+
+    cm200_init(&cm);
+    feed_cm200_required_frames(&cm, 3u, 100u);
+    EXPECT_TRUE(cm200_allows_torque(&cm));
+
+    cm200_note_command_tx(&cm, 5u, true, 500, 120u);
+    aa[0] = 5u;
+    aa[2] = 1u;
+    aa[5] = 0xF0u;
+    for(uint32_t i = 0u; i < CM200_INTEGRITY_MISMATCH_LIMIT; i++)
+    {
+        EXPECT_TRUE(cm200_parse_can_frame(&cm,
+                                          CM200_INTERNAL_STATES_CAN_ID,
+                                          true,
+                                          8u,
+                                          aa,
+                                          121u + i));
+    }
+    EXPECT_TRUE(cm.counter_fault);
+    EXPECT_TRUE(cm200_has_immediate_fault(&cm));
+    EXPECT_FALSE(cm200_allows_torque(&cm));
+
+    aa[5] = 0x60u;
+    EXPECT_TRUE(cm200_parse_can_frame(&cm, CM200_INTERNAL_STATES_CAN_ID, true, 8u, aa, 130u));
+    EXPECT_FALSE(cm.counter_fault);
+
+    put_u16_le(&ac[0], 123u);
+    for(uint32_t i = 0u; i < CM200_INTEGRITY_MISMATCH_LIMIT; i++)
+    {
+        put_u32_le(&ac[4], 1010u + i);
+        EXPECT_TRUE(cm200_parse_can_frame(&cm,
+                                          CM200_TORQUE_TIMER_CAN_ID,
+                                          true,
+                                          8u,
+                                          ac,
+                                          131u + i));
+    }
+    EXPECT_TRUE(cm.torque_echo_fault);
+    EXPECT_FALSE(cm200_allows_torque(&cm));
+
+    put_u32_le(&ac[4], 900u);
+    EXPECT_TRUE(cm200_parse_can_frame(&cm, CM200_TORQUE_TIMER_CAN_ID, true, 8u, ac, 140u));
+    EXPECT_TRUE(cm.timer_reset_fault);
+
+    ab[4] = 0x01u;
+    EXPECT_TRUE(cm200_parse_can_frame(&cm, CM200_FAULTS_CAN_ID, true, 8u, ab, 141u));
+    EXPECT_EQ_U32(cm.run_faults, 1u);
+    EXPECT_TRUE(cm200_has_immediate_fault(&cm));
+}
+
 static void run_test(const char *name, void (*fn)(void))
 {
     int before = failures;
@@ -575,6 +815,10 @@ int main(void)
     run_test("compact status drives stale and sequence checks", test_compact_status_drives_stale_and_sequence_checks);
     run_test("compact summary freshness thermal and sanity gates", test_compact_summary_freshness_thermal_and_sanity_gates);
     run_test("compact invalid frames rejected without mutation", test_compact_invalid_frames_rejected_without_mutation);
+    run_test("invalid required AMS frame revokes torque immediately", test_invalid_required_ams_frame_revokes_torque_immediately);
+    run_test("CM200 broadcast decoding and required gate", test_cm200_broadcast_decoding_and_required_gate);
+    run_test("CM200 malformed and freshness fail closed", test_cm200_malformed_and_freshness_fail_closed);
+    run_test("CM200 counter echo and timer guards", test_cm200_counter_echo_fault_and_timer_reset_detection);
 
     if(failures != 0)
     {

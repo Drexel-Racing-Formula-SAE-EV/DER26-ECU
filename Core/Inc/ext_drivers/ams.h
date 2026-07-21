@@ -31,6 +31,18 @@
 #define AMS_FRAME_DLC 8u
 #define AMS_STALE_TIMEOUT_MS 500u
 
+/* Physical-plausibility envelope for summaries used by the ECU torque gate.
+ * These are data-integrity bounds, not the AMS's operational trip limits. */
+#define AMS_CELL_VALID_MIN_MV       500u
+#define AMS_CELL_VALID_MAX_MV      5000u
+#define AMS_PACK_VALID_MAX_0P1V   10000u
+#define AMS_CURRENT_VALID_MIN_0P1A (-10000)
+#define AMS_CURRENT_VALID_MAX_0P1A  10000
+#define AMS_TEMP_VALID_MIN_0P1C     (-400)
+#define AMS_TEMP_VALID_MAX_0P1C      1500
+#define AMS_TOTAL_CELL_COUNT           75u
+#define AMS_TOTAL_TEMP_COUNT           85u
+
 #define AMS_THERMAL_OVERTEMP_FAULT_BIT       4u
 #define AMS_THERMAL_SEVERE_OVERTEMP_BIT      5u
 #define AMS_THERMAL_INVALID_OR_READ_FAULT_BIT 7u
@@ -140,6 +152,7 @@ typedef struct
     uint8_t usable_cell_count;
     uint8_t usable_temp_count;
     bool compact_health_valid;
+    bool compact_health_sane;
     bool compact_health_stale;
     uint32_t last_health_rx_tick;
 
@@ -156,6 +169,7 @@ bool ams_parse_telemetry_frame(ams_t *dev, const uint8_t *data, uint8_t dlc, uin
 bool ams_parse_estimator_frame(ams_t *dev, const uint8_t *data, uint8_t dlc, uint32_t now_ms);
 bool ams_parse_can_frame(ams_t *dev, uint32_t std_id, bool is_standard, uint8_t dlc, const uint8_t *data, uint32_t now_ms);
 bool ams_is_known_can_id(uint32_t std_id);
+void ams_invalidate_can_frame(ams_t *dev, uint32_t std_id);
 void ams_update_stale(ams_t *dev, uint32_t now_ms);
 bool ams_allows_torque(const ams_t *dev);
 

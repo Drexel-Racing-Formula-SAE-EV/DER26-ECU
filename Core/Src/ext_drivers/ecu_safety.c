@@ -30,7 +30,8 @@ bool ecu_faults_clear(const ecu_fault_inputs_t *faults)
              faults->canbus_tx_fault ||
              faults->imd_fail ||
              faults->bms_fail ||
-             faults->bspd_fail);
+             faults->bspd_fail ||
+             faults->cm200_fault);
 }
 
 bool ecu_rtd_conditions_met(const ecu_rtd_inputs_t *inputs)
@@ -44,6 +45,22 @@ bool ecu_rtd_conditions_met(const ecu_rtd_inputs_t *inputs)
             inputs->cascadia_ok &&
             inputs->brakelight &&
             inputs->rtd_button &&
+            ecu_faults_clear(&inputs->faults));
+}
+
+static bool ecu_rtd_buzz_conditions_met(const ecu_rtd_inputs_t *inputs)
+{
+    if(inputs == NULL)
+    {
+        return false;
+    }
+
+    /* The driver's dedicated action is momentary.  Brake actuation and all
+     * safety conditions must remain present through the ready-to-drive sound,
+     * but holding the button is not required. */
+    return (inputs->tsal &&
+            inputs->cascadia_ok &&
+            inputs->brakelight &&
             ecu_faults_clear(&inputs->faults));
 }
 
@@ -90,11 +107,18 @@ ecu_rtd_step_t ecu_rtd_step(rtd_state_t state,
             {
                 out.state = RTD_AWAIT_TSAL;
             }
-            else if(ecu_rtd_conditions_met(inputs))
+            else if(inputs->rtd_button && ecu_rtd_conditions_met(inputs))
             {
                 out.state = RTD_BUZZING;
                 out.buzz_start_tick = now_ms;
                 out.buzzer_on = true;
+            }
+            else if(inputs->rtd_button)
+            {
+                /* A press made before brake/controller/safety conditions are
+                 * valid is consumed.  Require release and a new deliberate
+                 * action; do not arm later from a held button. */
+                out.state = RTD_AWAIT_BUTTON_FALSE;
             }
             break;
 
@@ -103,9 +127,9 @@ ecu_rtd_step_t ecu_rtd_step(rtd_state_t state,
             {
                 out.state = RTD_AWAIT_TSAL;
             }
-            else if(!ecu_rtd_conditions_met(inputs))
+            else if(!ecu_rtd_buzz_conditions_met(inputs))
             {
-                out.state = RTD_AWAIT_CONDITIONS;
+                out.state = RTD_AWAIT_BUTTON_FALSE;
             }
             else if((uint32_t)(now_ms - buzz_start_tick) >= ECU_RTD_BUZZ_TIME_MS)
             {
@@ -123,9 +147,11 @@ ecu_rtd_step_t ecu_rtd_step(rtd_state_t state,
             {
                 out.state = RTD_AWAIT_TSAL;
             }
-            else if(!inputs->cascadia_ok || !inputs->rtd_button || !ecu_faults_clear(&inputs->faults))
+            else if(!inputs->cascadia_ok || !ecu_faults_clear(&inputs->faults))
             {
-                out.state = RTD_AWAIT_CONDITIONS;
+                /* A new release/press cycle is required after every RTD loss;
+                 * a held or stuck button cannot automatically re-enter RTD. */
+                out.state = RTD_AWAIT_BUTTON_FALSE;
             }
 
             if(out.state != RTD_ENABLED)
@@ -166,7 +192,8 @@ bool ecu_torque_allowed(const ecu_torque_inputs_t *inputs)
             !inputs->canbus_tx_fault &&
             !inputs->imd_fail &&
             !inputs->bms_fail &&
-            !inputs->bspd_fail);
+            !inputs->bspd_fail &&
+            !inputs->cm200_fault);
 }
 
 void ecu_discrete_filter_init(ecu_discrete_filter_t *filter)
@@ -275,6 +302,23 @@ uint8_t ecu_cm200_next_rolling_counter(uint8_t rolling_counter)
     return (uint8_t)((rolling_counter + 1u) & 0x0Fu);
 }
 
+bool ecu_cm200_packet_enabled(const uint8_t data[ECU_CM200_DATALEN])
+{
+    return ((data != NULL) && ((data[5] & 0x01u) != 0u));
+}
+
+int16_t ecu_cm200_packet_torque(const uint8_t data[ECU_CM200_DATALEN])
+{
+    uint16_t encoded;
+
+    if(data == NULL)
+    {
+        return 0;
+    }
+    encoded = (uint16_t)((uint16_t)data[0] | ((uint16_t)data[1] << 8u));
+    return (int16_t)encoded;
+}
+
 bool ecu_cm200_update_unlock(bool torque_allowed, uint8_t *disable_unlock_cycles)
 {
     if(disable_unlock_cycles == NULL)
@@ -295,6 +339,87 @@ bool ecu_cm200_update_unlock(bool torque_allowed, uint8_t *disable_unlock_cycles
     }
 
     return true;
+}
+
+int16_t ecu_torque_slew_limit(int16_t current_0p1nm,
+                              int16_t target_0p1nm,
+                              uint16_t rise_step_0p1nm,
+                              uint16_t fall_step_0p1nm)
+{
+    int32_t current = current_0p1nm;
+    int32_t target = target_0p1nm;
+
+    if(target > current)
+    {
+        int32_t next = current + (int32_t)rise_step_0p1nm;
+        return (int16_t)((next < target) ? next : target);
+    }
+    if(target < current)
+    {
+        int32_t next = current - (int32_t)fall_step_0p1nm;
+        return (int16_t)((next > target) ? next : target);
+    }
+    return current_0p1nm;
+}
+
+void ecu_cm200_supervisor_init(ecu_cm200_supervisor_t *supervisor)
+{
+    if(supervisor == NULL)
+    {
+        return;
+    }
+    memset(supervisor, 0, sizeof(*supervisor));
+}
+
+bool ecu_cm200_supervisor_update(ecu_cm200_supervisor_t *supervisor,
+                                 bool controller_on,
+                                 bool feedback_ready,
+                                 bool immediate_fault,
+                                 uint32_t now_ms)
+{
+    if(supervisor == NULL)
+    {
+        return true;
+    }
+
+    if(!controller_on)
+    {
+        if(!supervisor->startup_timeout_latched && !supervisor->runtime_fault_latched)
+        {
+            supervisor->controller_power_seen = false;
+            supervisor->ever_ready = false;
+            supervisor->controller_power_tick = now_ms;
+        }
+        return true;
+    }
+
+    if(!supervisor->controller_power_seen)
+    {
+        supervisor->controller_power_seen = true;
+        supervisor->controller_power_tick = now_ms;
+    }
+
+    if(immediate_fault)
+    {
+        supervisor->runtime_fault_latched = true;
+    }
+    else if(feedback_ready)
+    {
+        supervisor->ever_ready = true;
+    }
+    else if(supervisor->ever_ready)
+    {
+        supervisor->runtime_fault_latched = true;
+    }
+    else if((uint32_t)(now_ms - supervisor->controller_power_tick) >
+            ECU_CM200_STARTUP_GRACE_MS)
+    {
+        supervisor->startup_timeout_latched = true;
+    }
+
+    return (!feedback_ready ||
+            supervisor->startup_timeout_latched ||
+            supervisor->runtime_fault_latched);
 }
 
 bool ecu_heartbeat_expired(uint32_t last_tick, uint32_t now_tick, uint32_t max_age_ms)

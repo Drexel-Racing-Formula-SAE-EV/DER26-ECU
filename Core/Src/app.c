@@ -73,10 +73,15 @@ void app_create()
 	app.acc_fault = false;
 	app.cli_fault = false;
 	app.canbus_fault = false;
-	app.canbus_rx_fault = true;
+	app.canbus_rx_fault = false;
 	app.canbus_tx_fault = false;
 	app.canbus_hw_fault = false;
 	app.ams_fault = true;
+	app.cm200_fault = true;
+	app.cm200_ready = false;
+	app.cm200_feedback_seen = false;
+	app.cm200_startup_timeout = false;
+	app.cm200_runtime_fault_latched = false;
 	app.dashboard_fault = false;
 	app.mq_fault = false;
 
@@ -94,6 +99,11 @@ void app_create()
 	app.task_heartbeat_fault = false;
 	app.rtd_trip_pulse_requested = false;
 	app.cm200_rolling_counter = 0u;
+	app.cm200_target_torque_0p1nm = 0;
+	app.cm200_command_torque_0p1nm = 0;
+	app.ams_cm200_voltage_delta_0p1v = 0;
+	app.ams_cm200_voltage_crosscheck_valid = false;
+	app.ams_cm200_voltage_mismatch = false;
 
 	app.brakelight = false;
 
@@ -111,7 +121,9 @@ void app_create()
 	set_cascadia_enable(0);
 	set_cascadia_on(0);
 
-	app.cli_fault = (HAL_UART_Receive_IT(app.board.cli.huart, &app.board.cli.c, 1) != HAL_OK);
+	app.cli_fault = (HAL_UART_Receive_IT(app.board.cli.huart,
+	                                    (uint8_t *)&app.board.cli.c,
+	                                    1) != HAL_OK);
 	app.canbus_hw_fault = (HAL_CAN_ActivateNotification(app.board.canbus.hcan,
 	                             CAN_IT_RX_FIFO0_MSG_PENDING |
 	                             CAN_IT_RX_FIFO0_OVERRUN |

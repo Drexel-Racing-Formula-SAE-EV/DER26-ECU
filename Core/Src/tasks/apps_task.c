@@ -15,6 +15,7 @@
 #include "main.h"
 #include "tasks/apps_task.h"
 #include "ext_drivers/canbus.h"
+#include "ext_drivers/cm200.h"
 #include "ext_drivers/ecu_safety.h"
 
 /**
@@ -53,6 +54,8 @@ void apps_task_fn(void *arg)
     float apps1_raw_percent;
     float apps2_raw_percent;
     int16_t torque_0p1nm;
+    int16_t target_torque_0p1nm;
+    int16_t slew_torque_0p1nm = 0;
     uint32_t entry;
     uint8_t disable_unlock_cycles = ECU_CM200_DISABLE_UNLOCK_CYCLES;
     bool torque_allowed;
@@ -115,6 +118,7 @@ void apps_task_fn(void *arg)
             .imd_fail = data->imd_fail,
             .bms_fail = data->bms_fail,
             .bspd_fail = data->bspd_fail,
+            .cm200_fault = (data->cm200_fault || !data->cm200_ready),
             .rtd_mode = data->rtd_mode,
         };
 
@@ -123,15 +127,30 @@ void apps_task_fn(void *arg)
 
         if(!ECU_OUTPUTS_INHIBITED && ecu_cm200_update_unlock(torque_allowed, &disable_unlock_cycles))
         {
-            torque_0p1nm = (int16_t)((data->throttle * MAXTRQ) / 10); /* Nm*10. */
-            ecu_cm200_build_torque_packet(tx_packet.data, torque_0p1nm);
+            target_torque_0p1nm = (int16_t)((data->throttle * MAXTRQ) / 10); /* Nm*10. */
+            taskENTER_CRITICAL();
+            torque_0p1nm = cm200_clamp_motoring_torque(&data->board.cm200,
+                                                        target_torque_0p1nm);
+            taskEXIT_CRITICAL();
+            data->cm200_target_torque_0p1nm = torque_0p1nm;
+            slew_torque_0p1nm = ecu_torque_slew_limit(slew_torque_0p1nm,
+                                                       torque_0p1nm,
+                                                       ECU_TORQUE_RISE_STEP_0P1NM,
+                                                       ECU_TORQUE_FALL_STEP_0P1NM);
+            data->cm200_command_torque_0p1nm = slew_torque_0p1nm;
+            ecu_cm200_build_torque_packet(tx_packet.data, slew_torque_0p1nm);
         }
         else
         {
+            /* Fault and inhibit transitions bypass the normal down-slew. */
+            slew_torque_0p1nm = 0;
+            data->cm200_target_torque_0p1nm = 0;
+            data->cm200_command_torque_0p1nm = 0;
             ecu_cm200_build_disable_packet(tx_packet.data);
         }
 
-        /* xQueueSend wakes the blocked CAN task; no separate notification is needed. */
+        /* The one-slot mailbox wakes the CAN task and replaces any unsent older
+         * request, so a disable cannot sit behind stale positive torque. */
         if(canbus_queue_tx(&data->board.canbus, &tx_packet) != HAL_OK)
         {
             data->canbus_tx_fault = true;

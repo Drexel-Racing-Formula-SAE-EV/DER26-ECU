@@ -22,7 +22,7 @@
 #include "ext_drivers/ecu_safety.h"
 
 #define VER_MAJOR 2
-#define VER_MINOR 3
+#define VER_MINOR 4
 #define VER_BUG   0
 
 #define PLAUSIBILITY_THRESH 10
@@ -33,78 +33,89 @@
 
 #define COOLANT_FLOW_MIN 5.0f
 
-#define ERR_FREQ 20
-#define APPS_FREQ 20
+#define ERR_FREQ 100
+#define APPS_FREQ 100
 #define BSE_FREQ 20
 #define BPPC_FREQ 20
 #define CLI_FREQ 5
 #define ACC_FREQ 5
 #define DASH_FREQ 5
 #define COOL_FREQ 5
-#define RTD_FREQ 5
+#define RTD_FREQ 50
 
 #define ERR_PRIO 17
-#define CLI_PRIO 16
 #define RTD_PRIO 15
 #define CAN_PRIO 14
 #define APPS_PRIO 10
 #define BPPC_PRIO 8
 #define BSE_PRIO 7
+#define CLI_PRIO 6
 #define ACC_PRIO 5
 #define DASH_PRIO 4
 #define COOL_PRIO 3
 
-#define MAXTRQ 200 // maximum nM of toruqe that will be requested from motorcontroller (=100% throttle)
+#define MAXTRQ 200 /* Maximum requested motoring torque in Nm at 100% APPS. */
 
 typedef struct {
-	int throttle;
-	int brake;
+	volatile int throttle;
+	volatile int brake;
 
-	rtd_state_t rtd_mode;
+	volatile rtd_state_t rtd_mode;
 
-	bool hard_fault;
-	bool soft_fault;
+	volatile bool hard_fault;
+	volatile bool soft_fault;
 	
-	bool coolant_fault;
-	bool apps_fault;
-	bool bse_fault;
-	bool bppc_fault;
-	bool acc_fault;
-	bool cli_fault;
-	bool canbus_fault;
-	bool canbus_rx_fault;
-	bool canbus_tx_fault;
-	bool canbus_hw_fault;
-	bool ams_fault;
-	bool dashboard_fault;
-	bool mq_fault;
+	volatile bool coolant_fault;
+	volatile bool apps_fault;
+	volatile bool bse_fault;
+	volatile bool bppc_fault;
+	volatile bool acc_fault;
+	volatile bool cli_fault;
+	volatile bool canbus_fault;
+	volatile bool canbus_rx_fault;
+	volatile bool canbus_tx_fault;
+	volatile bool canbus_hw_fault;
+	volatile bool ams_fault;
+	volatile bool cm200_fault;
+	volatile bool cm200_ready;
+	volatile bool cm200_feedback_seen;
+	volatile bool cm200_startup_timeout;
+	volatile bool cm200_runtime_fault_latched;
+	volatile bool dashboard_fault;
+	volatile bool mq_fault;
 	
-	bool fw_state;
-	bool tsal;
-	bool rtd_button;
-	bool cascadia_ok;
-	bool cascadia_error;
-	bool cascadia_en;
-	bool cascadia_on;
-	bool imd_fail;
-	bool bms_fail;
-	bool bspd_fail;
-	bool bspd_ok_raw;
-	bool startup_fault;
-	bool task_heartbeat_fault;
-	bool rtd_trip_pulse_requested;
-	uint32_t can_error_code;
-	uint32_t can_rx_overrun_count;
-	uint32_t can_recovery_count;
+	volatile bool fw_state;
+	volatile bool tsal;
+	volatile bool rtd_button;
+	volatile bool cascadia_ok;
+	volatile bool cascadia_error;
+	volatile bool cascadia_en;
+	volatile bool cascadia_on;
+	volatile bool imd_fail;
+	volatile bool bms_fail;
+	volatile bool bspd_fail;
+	volatile bool bspd_ok_raw;
+	volatile bool startup_fault;
+	volatile bool task_heartbeat_fault;
+	volatile bool rtd_trip_pulse_requested;
+	volatile uint32_t can_error_code;
+	volatile uint32_t can_rx_overrun_count;
+	volatile uint32_t can_recovery_count;
 	uint32_t reset_cause;
-	uint8_t cm200_rolling_counter;
+	volatile uint8_t cm200_rolling_counter;
+	volatile int16_t cm200_target_torque_0p1nm;
+	volatile int16_t cm200_command_torque_0p1nm;
+	volatile int16_t ams_cm200_voltage_delta_0p1v;
+	volatile bool ams_cm200_voltage_crosscheck_valid;
+	volatile bool ams_cm200_voltage_mismatch;
 	volatile uint32_t apps_heartbeat_tick;
 	volatile uint32_t bse_heartbeat_tick;
 	volatile uint32_t bppc_heartbeat_tick;
 	volatile uint32_t rtd_heartbeat_tick;
 	volatile uint32_t can_heartbeat_tick;
+	volatile uint32_t cool_heartbeat_tick;
 
-	bool brakelight;
+	volatile bool brakelight;
 
 	float coolant_pressure;
 	float coolant_flow;

@@ -1,19 +1,22 @@
 # ECU Host Tests
 
-Host-side tests for ECU code that does not require STM32 hardware.
+These suites exercise pure ECU safety/parser logic without STM32 hardware. They do not prove pin levels, interrupt timing, physical CAN behavior, target ABI, or controller configuration.
 
-Current coverage:
-- AMS telemetry parser bounds checks
-- 75s / 5x15 voltage packet layout
-- temperature and fan tail packets
-- estimator CAN frame raw storage
-- stale AMS telemetry detection
-- invalid CAN frame rejection
-- compact AMS `0x680-0x683` frame parsing
-- compact BMS_OK/validity/fault torque-gate behavior
-- compact rolling-sequence stale/repeat checks
-- system SIL fault-injection for AMS torque gate, RTD state machine, CM200 disable-before-enable, and torque-gate matrix
-- deterministic fuzz on compact AMS status sequence/fault behavior
+Current coverage includes:
+
+- legacy AMS bounds/layout/tail parsing for all 75 cells, temperature groups, and fans;
+- compact AMS `0x680-0x683` decoding, protocol/sequence/freshness/fault gates, physical plausibility, and immediate invalidation of malformed required frames;
+- CM200 little-endian decoding for all supported broadcasts;
+- CM200 required-frame freshness, command-counter acquisition/progression/mismatch, torque echo, timer progression/reset, fault words, VSM torque readiness, and capability clamp;
+- split CM200 feedback-health versus torque-ready behavior through precharge;
+- CM200 startup grace, runtime loss, immediate fault, latching, and timer-wrap policy;
+- signed command encoding, direction-preserving disable, rolling counter, unlock sequence, packet inspection, and torque slew limiting;
+- RTD release-before-arm, early/stuck press rejection, momentary-button behavior, sound timing, fault exit, rearm, and tick wrap;
+- BPSD active-high healthy semantics and delayed healthy recovery;
+- complete torque-gate fault matrix and task-heartbeat wrap behavior;
+- deterministic AMS fault/sequence fuzz and extended stress runs;
+- bench/vehicle compile locks for both BPSD and CM200 acknowledgements;
+- GCC static analysis and ASan/UBSan for every host suite.
 
 Run from `host_tests/`:
 
@@ -22,26 +25,11 @@ make CC=gcc clean
 make CC=gcc unit
 make CC=gcc test
 make CC=gcc system-sil
-make CC=gcc stress
-make CC=gcc asan
+make CC=gcc profile-gates
 make CC=gcc analyze
+make CC=gcc asan
+make CC=gcc ubsan
+make CC=gcc stress
 ```
 
-## Unit tests
-
-`make unit` builds and runs focused ECU unit tests around the AMS CAN parser and state container. These tests cover:
-
-- initialization/zeroing behavior
-- big-endian telemetry decoding
-- all 75 cell-voltage slots across 5 segments
-- all temperature packet groups, including 17-channel tails
-- all fan packet groups, including the 10th-fan tail
-- bad header/DLC/null/extended-frame rejection
-- raw estimator status packet storage
-- stale-CAN timeout behavior, including timer wraparound
-- full packet sweep over packet IDs 0 through 61
-- compact AMS status/electrical/thermal/health frame decoding
-- compact status fault gating and reserved IMD bit behavior
-- compact sequence repeat detection and status-frame-only freshness
-
-`make test` keeps the broader regression harness. `make system-sil` runs the ECU software-in-the-loop/fault-injection harness. `make stress` reruns the SIL sequence fuzzer with a longer deterministic cycle count. `make ci` runs unit tests, regression tests, system SIL, and GCC analyzer.
+`make ci` runs unit, regression, system SIL, profile gates, and GCC analysis. The repository CI additionally type-checks every application source in the inhibited bench profile and the fully acknowledged vehicle profile, then performs the ARM-GCC target build when that toolchain is available.

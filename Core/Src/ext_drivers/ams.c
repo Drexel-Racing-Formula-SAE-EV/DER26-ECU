@@ -46,6 +46,42 @@ static void refresh_compact_stale_flag(ams_t *dev)
                   !dev->compact_thermal_valid || dev->compact_thermal_stale);
 }
 
+void ams_invalidate_can_frame(ams_t *dev, uint32_t std_id)
+{
+    if(dev == NULL)
+    {
+        return;
+    }
+
+    switch(std_id)
+    {
+        case AMS_ECU_STATUS_CANBUS_ID:
+            dev->compact_status_valid = false;
+            dev->compact_protocol_valid = false;
+            dev->compact_status_stale = true;
+            break;
+        case AMS_ECU_ELECTRICAL_CANBUS_ID:
+            dev->compact_electrical_valid = false;
+            dev->compact_electrical_sane = false;
+            dev->compact_electrical_stale = true;
+            break;
+        case AMS_ECU_THERMAL_CANBUS_ID:
+            dev->compact_thermal_valid = false;
+            dev->compact_thermal_sane = false;
+            dev->compact_thermal_stale = true;
+            break;
+        case AMS_ECU_HEALTH_CANBUS_ID:
+            dev->compact_health_valid = false;
+            dev->compact_health_sane = false;
+            dev->compact_health_stale = true;
+            break;
+        default:
+            break;
+    }
+
+    refresh_compact_stale_flag(dev);
+}
+
 void segment_init(segment_t *dev)
 {
     if(dev == NULL)
@@ -329,7 +365,13 @@ static bool ams_parse_compact_electrical_frame(ams_t *dev, const uint8_t *data, 
     dev->min_cell_mv = u16_be(&data[4]);
     dev->max_cell_mv = u16_be(&data[6]);
     dev->compact_electrical_valid = true;
-    dev->compact_electrical_sane = (dev->min_cell_mv <= dev->max_cell_mv);
+    dev->compact_electrical_sane =
+        ((dev->min_cell_mv >= AMS_CELL_VALID_MIN_MV) &&
+         (dev->min_cell_mv <= dev->max_cell_mv) &&
+         (dev->max_cell_mv <= AMS_CELL_VALID_MAX_MV) &&
+         (dev->pack_voltage_0p1v <= AMS_PACK_VALID_MAX_0P1V) &&
+         (dev->pack_current_0p1a >= AMS_CURRENT_VALID_MIN_0P1A) &&
+         (dev->pack_current_0p1a <= AMS_CURRENT_VALID_MAX_0P1A));
     dev->compact_electrical_stale = false;
     dev->last_electrical_rx_tick = now_ms;
     mark_rx(dev, now_ms);
@@ -354,7 +396,10 @@ static bool ams_parse_compact_thermal_frame(ams_t *dev, const uint8_t *data, uin
     dev->max_fan_percent = data[6];
     dev->thermal_flags = data[7];
     dev->compact_thermal_valid = true;
-    dev->compact_thermal_sane = ((dev->min_temp_0p1c <= dev->max_temp_0p1c) &&
+    dev->compact_thermal_sane = ((dev->min_temp_0p1c >= AMS_TEMP_VALID_MIN_0P1C) &&
+                                 (dev->min_temp_0p1c <= dev->avg_temp_0p1c) &&
+                                 (dev->avg_temp_0p1c <= dev->max_temp_0p1c) &&
+                                 (dev->max_temp_0p1c <= AMS_TEMP_VALID_MAX_0P1C) &&
                                  (dev->max_fan_percent <= 100u));
     dev->compact_thermal_stale = false;
     dev->last_thermal_rx_tick = now_ms;
@@ -383,6 +428,14 @@ static bool ams_parse_compact_health_frame(ams_t *dev, const uint8_t *data, uint
     dev->usable_cell_count = data[6];
     dev->usable_temp_count = data[7];
     dev->compact_health_valid = true;
+    dev->compact_health_sane = ((dev->max_voltage_segment < NSEGS) &&
+                                (dev->min_voltage_segment < NSEGS) &&
+                                (dev->max_temp_segment < NSEGS) &&
+                                (dev->max_voltage_cell < NVOLTS) &&
+                                (dev->min_voltage_cell < NVOLTS) &&
+                                (dev->max_temp_sensor < NTEMPS) &&
+                                (dev->usable_cell_count <= AMS_TOTAL_CELL_COUNT) &&
+                                (dev->usable_temp_count <= AMS_TOTAL_TEMP_COUNT));
     dev->compact_health_stale = false;
     dev->last_health_rx_tick = now_ms;
     mark_rx(dev, now_ms);
@@ -401,11 +454,18 @@ bool ams_is_known_can_id(uint32_t std_id)
 
 bool ams_parse_can_frame(ams_t *dev, uint32_t std_id, bool is_standard, uint8_t dlc, const uint8_t *data, uint32_t now_ms)
 {
-    if((dev == NULL) || (data == NULL) || !is_standard)
+    if(dev == NULL)
     {
-        if(dev != NULL)
+        return false;
+    }
+
+    if((data == NULL) || !is_standard ||
+       (ams_is_known_can_id(std_id) && (dlc != AMS_FRAME_DLC)))
+    {
+        if(ams_is_known_can_id(std_id))
         {
             dev->bad_rx_count++;
+            ams_invalidate_can_frame(dev, std_id);
         }
         return false;
     }

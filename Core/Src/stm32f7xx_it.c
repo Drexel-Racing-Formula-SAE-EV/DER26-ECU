@@ -265,7 +265,13 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart){
 
 	if((cli->huart != NULL) && (cli->huart->Instance == huart->Instance))
 	{
-		if(cli->c == '\r')
+		/* Preserve a completed command until the CLI task has copied it.  New
+		 * bytes are discarded while pending instead of overwriting that line. */
+		if(cli->msg_pending)
+		{
+			/* Nothing to mutate. */
+		}
+		else if(cli->c == '\r')
 		{
 			cli->line[cli->index] = '\0';
 			cli->index = 0u;
@@ -295,7 +301,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart){
 			}
 		}
 
-		ret = HAL_UART_Receive_IT(cli->huart, &cli->c, 1);
+		ret = HAL_UART_Receive_IT(cli->huart, (uint8_t *)&cli->c, 1);
 		app.cli_fault = (ret != HAL_OK);
 	}
 }
@@ -306,40 +312,100 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
 	canbus_t *canbus = &app.board.canbus;
 	canbus_packet_t *rx_packet = &canbus->rx_packet;
     ams_t *ams = &app.board.ams;
-	CAN_RxHeaderTypeDef rx_header = {0};
+	cm200_t *cm200 = &app.board.cm200;
 
     if((canbus == NULL) || (canbus->hcan == NULL) || (hcan != canbus->hcan))
     {
         return;
     }
 
-	for (uint8_t i = 0; i < 8; i++)
+    /* Drain a bounded number of frames per callback.  This prevents a busy bus
+     * from monopolizing interrupt time while avoiding one-callback/one-frame
+     * backlog growth. */
+    for(uint8_t received = 0u;
+        (received < CANBUS_RX_ISR_BUDGET) &&
+        (HAL_CAN_GetRxFifoFillLevel(canbus->hcan, CAN_RX_FIFO0) != 0u);
+        received++)
     {
-        rx_packet->data[i] = 0x00;
-    }
+        CAN_RxHeaderTypeDef rx_header = {0};
+        uint8_t rx_data[DATALEN] = {0};
+        uint32_t std_id;
+        bool is_standard;
+        bool is_data;
+        bool known_ams;
+        bool known_cm200;
+        bool parsed = false;
 
-	if(HAL_CAN_GetRxMessage(canbus->hcan, CAN_RX_FIFO0, &rx_header, rx_packet->data) != HAL_OK)
-    {
-        app.canbus_rx_fault = true;
-        return;
-    }
+        if(HAL_CAN_GetRxMessage(canbus->hcan, CAN_RX_FIFO0, &rx_header, rx_data) != HAL_OK)
+        {
+            app.canbus_rx_fault = true;
+            return;
+        }
 
-	rx_packet->id = rx_header.StdId;
+        is_standard = (rx_header.IDE == CAN_ID_STD);
+        is_data = (rx_header.RTR == CAN_RTR_DATA);
+        std_id = rx_header.StdId;
+        known_ams = (is_standard && ams_is_known_can_id(std_id));
+        known_cm200 = (is_standard && cm200_is_known_can_id(std_id));
 
-    bool parsed = ams_parse_can_frame(ams,
-                                      rx_header.StdId,
-                                      (rx_header.IDE == CAN_ID_STD),
-                                      (uint8_t)rx_header.DLC,
-                                      rx_packet->data,
-                                      osKernelGetTickCount());
+        rx_packet->id = is_standard ? std_id : rx_header.ExtId;
+        memcpy(rx_packet->data, rx_data, sizeof(rx_packet->data));
 
-	if(!parsed && (rx_header.IDE == CAN_ID_STD) && ams_is_known_can_id(rx_header.StdId))
-    {
-        app.canbus_rx_fault = true;
-    }
-    else if(parsed)
-    {
-        app.canbus_rx_fault = false;
+        if(!is_data)
+        {
+            canbus->rx_remote_count++;
+            if(known_ams)
+            {
+                ams->bad_rx_count++;
+                ams_invalidate_can_frame(ams, std_id);
+            }
+            if(known_cm200)
+            {
+                cm200->bad_rx_count++;
+                cm200_invalidate_can_frame(cm200, std_id);
+            }
+            if(known_ams || known_cm200)
+            {
+                canbus->rx_malformed_count++;
+            }
+            else
+            {
+                canbus->rx_ignored_count++;
+            }
+            continue;
+        }
+
+        if(known_ams)
+        {
+            parsed = ams_parse_can_frame(ams,
+                                         std_id,
+                                         true,
+                                         (uint8_t)rx_header.DLC,
+                                         rx_data,
+                                         HAL_GetTick());
+        }
+        else if(known_cm200)
+        {
+            parsed = cm200_parse_can_frame(cm200,
+                                           std_id,
+                                           true,
+                                           (uint8_t)rx_header.DLC,
+                                           rx_data,
+                                           HAL_GetTick());
+        }
+
+        if(parsed)
+        {
+            canbus->rx_accepted_count++;
+        }
+        else if(known_ams || known_cm200)
+        {
+            canbus->rx_malformed_count++;
+        }
+        else
+        {
+            canbus->rx_ignored_count++;
+        }
     }
 }
 

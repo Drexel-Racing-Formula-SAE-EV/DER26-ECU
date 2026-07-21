@@ -25,6 +25,7 @@
 #include "ext_drivers/ntc.h"
 #include "ext_drivers/pwm.h"
 #include "ext_drivers/ams.h"
+#include "ext_drivers/cm200.h"
 
 #define APPS1_0 1650
 #define APPS1_100 2350
@@ -72,6 +73,7 @@ typedef struct {
 	dashboard_t dashboard;
 	pwm_t ssa;
 	ams_t ams;
+	cm200_t cm200;
 } board_t;
 
 void board_init(board_t *dev);

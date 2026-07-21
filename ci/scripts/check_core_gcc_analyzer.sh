@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# This is a host parser/type-check pass for every ECU application source. It is
-# not a replacement for the ARM build. Pointer-size warnings from CMSIS and the
-# newlib task reentrancy object are disabled only for this x86 syntax check.
+# Whole-application GCC analyzer pass. This host parse does not replace the
+# STM32/ARM target build, but it covers all application sources in both locked
+# build profiles with the same device and RTOS headers used by the syntax pass.
 
 ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 
 COMMON=(
   -fsyntax-only
+  -fanalyzer
   -std=gnu11
   -Wall
   -Wextra
@@ -44,4 +45,4 @@ gcc "${COMMON[@]}" -DECU_BUILD_PROFILE=1 -DECU_BSPD_INTERFACE_3V3_VALIDATED=1 \
   -DECU_CM200_CAN_CONTRACT_VALIDATED=1 \
   "${INCLUDES[@]}" "${SOURCES[@]}"
 
-echo "Full ECU application syntax check passed for bench and vehicle profiles."
+echo "GCC full-source analyzer passed for bench and vehicle profiles (${#SOURCES[@]} files each)."

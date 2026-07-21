@@ -12,6 +12,7 @@ LDLIBS := -lm
 
 CORE_SRC := \
 	$(ECU_ROOT)/Core/Src/ext_drivers/ams.c \
+	$(ECU_ROOT)/Core/Src/ext_drivers/cm200.c \
 	$(ECU_ROOT)/Core/Src/ext_drivers/ecu_safety.c
 
 SRC := src/ecu_host_test_runner.c $(CORE_SRC)
@@ -82,8 +83,14 @@ profile-gates:
 	else \
 		echo "PASS vehicle profile is locked without BSPD interface acknowledgement"; \
 	fi
-	$(CC) $(CFLAGS_COMMON) -DECU_BUILD_PROFILE=1 -DECU_BSPD_INTERFACE_3V3_VALIDATED=1 -fsyntax-only $(CORE_SRC)
-	@echo "PASS acknowledged vehicle profile compiles"
+	@if $(CC) $(CFLAGS_COMMON) -DECU_BUILD_PROFILE=1 -DECU_BSPD_INTERFACE_3V3_VALIDATED=1 -fsyntax-only $(CORE_SRC) >/dev/null 2>&1; then \
+		echo "ERROR: vehicle profile compiled without CM200 contract acknowledgement"; exit 1; \
+	else \
+		echo "PASS vehicle profile is locked without CM200 contract acknowledgement"; \
+	fi
+	$(CC) $(CFLAGS_COMMON) -DECU_BUILD_PROFILE=1 -DECU_BSPD_INTERFACE_3V3_VALIDATED=1 \
+		-DECU_CM200_CAN_CONTRACT_VALIDATED=1 -fsyntax-only $(CORE_SRC)
+	@echo "PASS fully acknowledged vehicle profile compiles"
 
 clang-analyze: make-build-dir
 	$(CLANG) $(CFLAGS_COMMON) --analyze $(UNIT_SRC)

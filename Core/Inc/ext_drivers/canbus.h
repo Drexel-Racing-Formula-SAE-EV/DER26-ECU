@@ -21,7 +21,8 @@
 
 #define DATALEN 8
 #define CANBUS_TX_TIMEOUT_MS 1u
-#define CANBUS_TX_QUEUE_LENGTH 8u
+#define CANBUS_TX_QUEUE_LENGTH 1u
+#define CANBUS_RX_ISR_BUDGET   8u
 
 typedef struct {
     uint32_t id;
@@ -34,7 +35,13 @@ typedef struct {
     uint32_t tx_mailbox;
     canbus_packet_t rx_packet;
     QueueHandle_t tx_queue;
-    uint32_t tx_dropped_count;
+    volatile uint32_t tx_dropped_count;
+    volatile uint32_t tx_replaced_count;
+    volatile uint32_t rx_accepted_count;
+    volatile uint32_t rx_ignored_count;
+    volatile uint32_t rx_malformed_count;
+    volatile uint32_t rx_remote_count;
+    bool filters_configured;
     bool started;
 } canbus_t;
 

@@ -25,6 +25,8 @@ void pressure_sensor_init(pressure_sensor_t *sensor, uint16_t min, uint16_t max,
 	sensor->max = max;
 	sensor->handle = handle;
 	sensor->channel = channel;
+	sensor->count = 0u;
+	sensor->percent = 0.0f;
 }
 
 float pressure_sensor_get_percent(pressure_sensor_t *root)

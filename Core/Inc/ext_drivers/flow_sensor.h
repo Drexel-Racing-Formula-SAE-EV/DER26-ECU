@@ -8,6 +8,7 @@
 #ifndef __FLOW_SENSOR_H_
 #define __FLOW_SENSOR_H_
 
+#include <stdbool.h>
 #include <stdint.h>
 #include "stm32f7xx_hal.h"
 
@@ -22,10 +23,14 @@ typedef struct
 	uint32_t total_count;
 	float duty;
 	float freq;
+	volatile uint32_t last_capture_tick;
+	volatile bool valid;
+	volatile bool stale;
 	int ret;
 } flow_sensor_t;
 
 void flow_sensor_init(flow_sensor_t *dev, uint32_t clock_freq, TIM_HandleTypeDef *htim, TIM_TypeDef *tim, HAL_TIM_ActiveChannel high_channel, HAL_TIM_ActiveChannel total_channel);
 int flow_sensor_read(flow_sensor_t *dev);
+void flow_sensor_update_stale(flow_sensor_t *dev, uint32_t now_ms, uint32_t timeout_ms);
 
 #endif /* __FLOW_SENSOR_H_ */

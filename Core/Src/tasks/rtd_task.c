@@ -44,6 +44,11 @@ void rtd_task_fn(void *arg)
     }
     uint32_t entry;
     uint32_t buzz_start_tick = 0u;
+    ecu_discrete_filter_t tsal_filter = {0};
+    ecu_discrete_filter_t motor_ok_filter = {0};
+
+    ecu_discrete_filter_init(&tsal_filter);
+    ecu_discrete_filter_init(&motor_ok_filter);
 
     for(;;)
     {
@@ -53,9 +58,17 @@ void rtd_task_fn(void *arg)
         const bool tsal_raw = (HAL_GPIO_ReadPin(TSAL_HV_SIG_GPIO_Port, TSAL_HV_SIG_Pin) == GPIO_PIN_SET);
         const bool button_raw = (HAL_GPIO_ReadPin(RTD_Go_GPIO_Port, RTD_Go_Pin) == GPIO_PIN_SET);
         const bool mtr_ok_raw = (HAL_GPIO_ReadPin(MTR_Ok_GPIO_Port, MTR_Ok_Pin) == GPIO_PIN_SET);
-        data->tsal = ECU_TSAL_ACTIVE_HIGH ? tsal_raw : !tsal_raw;
+        const bool tsal_decoded = ECU_TSAL_ACTIVE_HIGH ? tsal_raw : !tsal_raw;
+        const bool motor_ok_decoded = ECU_MTR_OK_ACTIVE_LOW ? !mtr_ok_raw : mtr_ok_raw;
+        /* Loss is immediate; assertion requires three consecutive 50 Hz
+         * samples so startup/glitch edges cannot arm RTD. */
+        data->tsal = !ecu_discrete_fault_update(&tsal_filter,
+                                                 !tsal_decoded,
+                                                 3u);
         data->rtd_button = ECU_RTD_BUTTON_ACTIVE_LOW ? !button_raw : button_raw;
-        data->cascadia_ok = ECU_MTR_OK_ACTIVE_LOW ? !mtr_ok_raw : mtr_ok_raw;
+        data->cascadia_ok = !ecu_discrete_fault_update(&motor_ok_filter,
+                                                        !motor_ok_decoded,
+                                                        3u);
 
         const ecu_rtd_inputs_t inputs = {
             .tsal = data->tsal,
@@ -74,6 +87,7 @@ void rtd_task_fn(void *arg)
                 .imd_fail = data->imd_fail,
                 .bms_fail = data->bms_fail,
                 .bspd_fail = data->bspd_fail,
+                .cm200_fault = (data->cm200_fault || !data->cm200_ready),
             },
         };
 

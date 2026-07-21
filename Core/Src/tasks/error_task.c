@@ -52,11 +52,13 @@ void error_task_fn(void *arg)
     ecu_discrete_filter_t bms_filter = {0};
     ecu_discrete_filter_t bspd_filter = {0};
     ecu_discrete_filter_t mtr_fault_filter = {0};
+    ecu_cm200_supervisor_t cm200_supervisor = {0};
 
     ecu_discrete_filter_init(&imd_filter);
     ecu_discrete_filter_init(&bms_filter);
     ecu_discrete_filter_init(&bspd_filter);
     ecu_discrete_filter_init(&mtr_fault_filter);
+    ecu_cm200_supervisor_init(&cm200_supervisor);
 
     for(;;)
     {
@@ -64,20 +66,52 @@ void error_task_fn(void *arg)
         bool cascadia_enable_allowed;
         bool firmware_ok_allowed;
         bool raw_high;
+        bool base_hard_fault;
+        bool cm200_feedback_ready;
+        bool cm200_torque_ready;
+        bool cm200_immediate_fault;
+        ecu_fault_inputs_t power_faults;
         ecu_fault_inputs_t shutdown_faults;
 
         taskENTER_CRITICAL();
         ams_update_stale(&data->board.ams, entry);
         data->ams_fault = !ams_allows_torque(&data->board.ams);
+        cm200_update_stale(&data->board.cm200, entry);
+        cm200_feedback_ready = cm200_feedback_healthy(&data->board.cm200);
+        cm200_torque_ready = cm200_allows_torque(&data->board.cm200);
+        cm200_immediate_fault = cm200_has_immediate_fault(&data->board.cm200);
+        if(data->board.ams.compact_electrical_valid &&
+           data->board.ams.compact_electrical_sane &&
+           !data->board.ams.compact_electrical_stale &&
+           data->board.cm200.frame[CM200_FRAME_VOLTAGE].valid &&
+           data->board.cm200.frame[CM200_FRAME_VOLTAGE].sane &&
+           !data->board.cm200.frame[CM200_FRAME_VOLTAGE].stale)
+        {
+            int32_t voltage_delta = (int32_t)data->board.cm200.dc_bus_voltage_0p1v -
+                                    (int32_t)data->board.ams.pack_voltage_0p1v;
+            data->ams_cm200_voltage_delta_0p1v = (int16_t)voltage_delta;
+            data->ams_cm200_voltage_crosscheck_valid = true;
+            data->ams_cm200_voltage_mismatch =
+                ((voltage_delta > (int32_t)ECU_AMS_CM200_VOLTAGE_TOLERANCE_0P1V) ||
+                 (voltage_delta < -(int32_t)ECU_AMS_CM200_VOLTAGE_TOLERANCE_0P1V));
+        }
+        else
+        {
+            data->ams_cm200_voltage_delta_0p1v = 0;
+            data->ams_cm200_voltage_crosscheck_valid = false;
+            data->ams_cm200_voltage_mismatch = false;
+        }
         taskEXIT_CRITICAL();
+        data->cm200_ready = cm200_torque_ready;
         if((uint32_t)(entry - supervisor_start_tick) >= 1000u)
         {
             data->task_heartbeat_fault =
                 ecu_heartbeat_expired(data->apps_heartbeat_tick, entry, 250u) ||
                 ecu_heartbeat_expired(data->bse_heartbeat_tick, entry, 250u) ||
                 ecu_heartbeat_expired(data->bppc_heartbeat_tick, entry, 250u) ||
-                ecu_heartbeat_expired(data->rtd_heartbeat_tick, entry, 500u) ||
-                ecu_heartbeat_expired(data->can_heartbeat_tick, entry, 250u);
+                ecu_heartbeat_expired(data->rtd_heartbeat_tick, entry, 250u) ||
+                ecu_heartbeat_expired(data->can_heartbeat_tick, entry, 250u) ||
+                ecu_heartbeat_expired(data->cool_heartbeat_tick, entry, 750u);
         }
         data->canbus_fault = (data->canbus_rx_fault || data->canbus_tx_fault || data->canbus_hw_fault);
 
@@ -109,25 +143,17 @@ void error_task_fn(void *arg)
 //							data->coolant_fault ||
 //							data->cascadia_error
 //						    );
-		data->hard_fault = (data->coolant_fault ||
-							data->cascadia_error ||
-                            data->startup_fault ||
-                            data->task_heartbeat_fault
-						    );
-        
-        data->soft_fault =(data->apps_fault ||
-        				   data->bse_fault  ||
-        				   data->bppc_fault ||
-        				   data->cli_fault  ||
-						   data->acc_fault  ||
-						   data->canbus_fault ||
-                           data->ams_fault ||
-						   data->dashboard_fault
-						   );
+        base_hard_fault = (data->coolant_fault ||
+                           data->cascadia_error ||
+                           data->startup_fault ||
+                           data->task_heartbeat_fault);
 
-
-        shutdown_faults = (ecu_fault_inputs_t){
-            .hard_fault = data->hard_fault,
+        /* Missing CM200 feedback cannot prevent the ECU from initially
+         * powering the controller, because the broadcasts may not exist until
+         * Cascadia_ON is asserted.  A latched CM200 startup/runtime fault does
+         * prevent another power attempt until MCU reset. */
+        power_faults = (ecu_fault_inputs_t){
+            .hard_fault = base_hard_fault,
             .apps_fault = data->apps_fault,
             .bse_fault = data->bse_fault,
             .bppc_fault = data->bppc_fault,
@@ -138,6 +164,7 @@ void error_task_fn(void *arg)
             .imd_fail = data->imd_fail,
             .bms_fail = data->bms_fail,
             .bspd_fail = data->bspd_fail,
+            .cm200_fault = false,
         };
 
         if(data->rtd_trip_pulse_requested)
@@ -152,13 +179,10 @@ void error_task_fn(void *arg)
             rtd_trip_pulse_active = false;
         }
 
-        firmware_ok_allowed = (!ECU_OUTPUTS_INHIBITED &&
-                               !rtd_trip_pulse_active &&
-                               ecu_faults_clear(&shutdown_faults));
-        set_ecu_ok(firmware_ok_allowed);
-
         cascadia_enable_allowed = (!ECU_OUTPUTS_INHIBITED &&
-                                   ecu_faults_clear(&shutdown_faults));
+                                   !cm200_supervisor.startup_timeout_latched &&
+                                   !cm200_supervisor.runtime_fault_latched &&
+                                   ecu_faults_clear(&power_faults));
         if(cascadia_enable_allowed)
         {
             if(!data->cascadia_en)
@@ -167,7 +191,8 @@ void error_task_fn(void *arg)
                 set_cascadia_enable(1);
                 cascadia_enable_tick = entry;
             }
-            else if((uint32_t)(entry - cascadia_enable_tick) >= 3000u)
+            else if((uint32_t)(entry - cascadia_enable_tick) >=
+                    ECU_CM200_POWER_SEQUENCE_DELAY_MS)
             {
                 set_cascadia_on(1);
             }
@@ -178,6 +203,43 @@ void error_task_fn(void *arg)
             set_cascadia_enable(0);
             cascadia_enable_tick = entry;
         }
+
+        data->cm200_fault = ecu_cm200_supervisor_update(&cm200_supervisor,
+                                                        data->cascadia_on,
+                                                        cm200_feedback_ready,
+                                                        cm200_immediate_fault,
+                                                        entry);
+        data->cm200_feedback_seen = cm200_supervisor.ever_ready;
+        data->cm200_startup_timeout = cm200_supervisor.startup_timeout_latched;
+        data->cm200_runtime_fault_latched = cm200_supervisor.runtime_fault_latched;
+
+        if(data->cm200_startup_timeout || data->cm200_runtime_fault_latched)
+        {
+            set_cascadia_on(0);
+            set_cascadia_enable(0);
+        }
+
+        data->hard_fault = (base_hard_fault ||
+                            data->cm200_startup_timeout ||
+                            data->cm200_runtime_fault_latched);
+        data->soft_fault = (data->apps_fault ||
+                            data->bse_fault ||
+                            data->bppc_fault ||
+                            data->cli_fault ||
+                            data->acc_fault ||
+                            data->canbus_fault ||
+                            data->ams_fault ||
+                            data->cm200_fault ||
+                            data->dashboard_fault);
+
+        shutdown_faults = power_faults;
+        shutdown_faults.hard_fault = data->hard_fault;
+        shutdown_faults.cm200_fault = data->cm200_fault;
+
+        firmware_ok_allowed = (!ECU_OUTPUTS_INHIBITED &&
+                               !rtd_trip_pulse_active &&
+                               ecu_faults_clear(&shutdown_faults));
+        set_ecu_ok(firmware_ok_allowed);
 
         if(!data->startup_fault && !data->task_heartbeat_fault)
         {
