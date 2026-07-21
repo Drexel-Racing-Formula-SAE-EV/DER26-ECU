@@ -37,7 +37,13 @@ static void mark_rx(ams_t *dev, uint32_t now_ms)
 {
     dev->last_rx_tick = now_ms;
     dev->rx_count++;
-    dev->stale = false;
+}
+
+static void refresh_compact_stale_flag(ams_t *dev)
+{
+    dev->stale = (!dev->compact_status_valid || dev->compact_status_stale ||
+                  !dev->compact_electrical_valid || dev->compact_electrical_stale ||
+                  !dev->compact_thermal_valid || dev->compact_thermal_stale);
 }
 
 void segment_init(segment_t *dev)
@@ -210,6 +216,10 @@ bool ams_parse_telemetry_frame(ams_t *dev, const uint8_t *data, uint8_t dlc, uin
 
     dev->last_packet_header = header;
     mark_rx(dev, now_ms);
+    if(!dev->compact_status_valid)
+    {
+        dev->stale = false;
+    }
     return true;
 }
 
@@ -297,7 +307,9 @@ static bool ams_parse_compact_status_frame(ams_t *dev, const uint8_t *data, uint
     dev->compact_status_valid = true;
     dev->compact_status_rx_count++;
     dev->last_status_rx_tick = now_ms;
+    dev->compact_status_stale = false;
     mark_rx(dev, now_ms);
+    refresh_compact_stale_flag(dev);
     return true;
 }
 
@@ -317,7 +329,11 @@ static bool ams_parse_compact_electrical_frame(ams_t *dev, const uint8_t *data, 
     dev->min_cell_mv = u16_be(&data[4]);
     dev->max_cell_mv = u16_be(&data[6]);
     dev->compact_electrical_valid = true;
+    dev->compact_electrical_sane = (dev->min_cell_mv <= dev->max_cell_mv);
+    dev->compact_electrical_stale = false;
+    dev->last_electrical_rx_tick = now_ms;
     mark_rx(dev, now_ms);
+    refresh_compact_stale_flag(dev);
     return true;
 }
 
@@ -338,7 +354,12 @@ static bool ams_parse_compact_thermal_frame(ams_t *dev, const uint8_t *data, uin
     dev->max_fan_percent = data[6];
     dev->thermal_flags = data[7];
     dev->compact_thermal_valid = true;
+    dev->compact_thermal_sane = ((dev->min_temp_0p1c <= dev->max_temp_0p1c) &&
+                                 (dev->max_fan_percent <= 100u));
+    dev->compact_thermal_stale = false;
+    dev->last_thermal_rx_tick = now_ms;
     mark_rx(dev, now_ms);
+    refresh_compact_stale_flag(dev);
     return true;
 }
 
@@ -362,6 +383,8 @@ static bool ams_parse_compact_health_frame(ams_t *dev, const uint8_t *data, uint
     dev->usable_cell_count = data[6];
     dev->usable_temp_count = data[7];
     dev->compact_health_valid = true;
+    dev->compact_health_stale = false;
+    dev->last_health_rx_tick = now_ms;
     mark_rx(dev, now_ms);
     return true;
 }
@@ -422,8 +445,6 @@ bool ams_parse_can_frame(ams_t *dev, uint32_t std_id, bool is_standard, uint8_t 
 
 void ams_update_stale(ams_t *dev, uint32_t now_ms)
 {
-    uint32_t freshness_tick;
-
     if(dev == NULL)
     {
         return;
@@ -431,19 +452,25 @@ void ams_update_stale(ams_t *dev, uint32_t now_ms)
 
     if(dev->compact_status_valid)
     {
-        freshness_tick = dev->last_status_rx_tick;
+        dev->compact_status_stale = ((uint32_t)(now_ms - dev->last_status_rx_tick) > AMS_STALE_TIMEOUT_MS);
+        dev->compact_electrical_stale = (!dev->compact_electrical_valid ||
+            ((uint32_t)(now_ms - dev->last_electrical_rx_tick) > AMS_STALE_TIMEOUT_MS));
+        dev->compact_thermal_stale = (!dev->compact_thermal_valid ||
+            ((uint32_t)(now_ms - dev->last_thermal_rx_tick) > AMS_STALE_TIMEOUT_MS));
+        dev->compact_health_stale = (!dev->compact_health_valid ||
+            ((uint32_t)(now_ms - dev->last_health_rx_tick) > AMS_STALE_TIMEOUT_MS));
+        refresh_compact_stale_flag(dev);
+        return;
     }
-    else if(dev->rx_count != 0u)
+
+    if(dev->rx_count != 0u)
     {
-        freshness_tick = dev->last_rx_tick;
+        dev->stale = ((uint32_t)(now_ms - dev->last_rx_tick) > AMS_STALE_TIMEOUT_MS);
     }
     else
     {
         dev->stale = true;
-        return;
     }
-
-    dev->stale = ((uint32_t)(now_ms - freshness_tick) > AMS_STALE_TIMEOUT_MS);
 }
 
 bool ams_allows_torque(const ams_t *dev)
@@ -456,6 +483,14 @@ bool ams_allows_torque(const ams_t *dev)
     if(dev->compact_status_valid)
     {
         return (!dev->stale &&
+                !dev->compact_status_stale &&
+                dev->compact_electrical_valid &&
+                dev->compact_electrical_sane &&
+                !dev->compact_electrical_stale &&
+                dev->compact_thermal_valid &&
+                dev->compact_thermal_sane &&
+                !dev->compact_thermal_stale &&
+                ((dev->thermal_flags & AMS_THERMAL_TORQUE_BLOCK_MASK) == 0u) &&
                 dev->bms_ok &&
                 !dev->bms_inhibited &&
                 !dev->ams_hard_fault &&

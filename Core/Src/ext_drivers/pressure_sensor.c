@@ -17,6 +17,10 @@
 
 void pressure_sensor_init(pressure_sensor_t *sensor, uint16_t min, uint16_t max, ADC_HandleTypeDef *handle, uint8_t channel)
 {
+	if(sensor == NULL)
+	{
+		return;
+	}
 	sensor->min = min;
 	sensor->max = max;
 	sensor->handle = handle;
@@ -25,6 +29,10 @@ void pressure_sensor_init(pressure_sensor_t *sensor, uint16_t min, uint16_t max,
 
 float pressure_sensor_get_percent(pressure_sensor_t *root)
 {
+	if((root == NULL) || (root->min == root->max))
+	{
+		return 0.0f;
+	}
 	float percent = (float)map(root->count, root->min, root->max, 0, 100);
 	if(percent > 100.0)
 	{

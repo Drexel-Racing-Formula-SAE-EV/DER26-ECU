@@ -21,7 +21,7 @@ UNIT_BIN := $(BUILD_DIR)/ecu_unit_tests
 SIL_SRC := system/ecu_system_sil_runner.c $(CORE_SRC)
 SIL_BIN := $(BUILD_DIR)/ecu_system_sil_tests
 
-.PHONY: help clean unit test system-sil stress asan ubsan analyze clang-analyze ci make-build-dir list
+.PHONY: help clean unit test system-sil stress asan ubsan analyze clang-analyze profile-gates ci make-build-dir list
 
 help:
 	@echo "Targets:"
@@ -32,6 +32,7 @@ help:
 	@echo "  make asan       Run all host tests with AddressSanitizer + UBSan"
 	@echo "  make ubsan      Run all host tests with UBSan only"
 	@echo "  make analyze    Run GCC analyzer on host-testable ECU code"
+	@echo "  make profile-gates Verify bench/vehicle build interlocks"
 	@echo "  make ci         Run unit, regression, system SIL, and analyzer targets"
 	@echo "  make clean      Remove build outputs"
 
@@ -74,12 +75,22 @@ analyze: make-build-dir
 	$(CC) $(CFLAGS_COMMON) -fanalyzer -fsyntax-only $(SRC)
 	$(CC) $(CFLAGS_COMMON) -fanalyzer -fsyntax-only $(SIL_SRC)
 
+profile-gates:
+	$(CC) $(CFLAGS_COMMON) -DECU_BUILD_PROFILE=0 -fsyntax-only $(CORE_SRC)
+	@if $(CC) $(CFLAGS_COMMON) -DECU_BUILD_PROFILE=1 -fsyntax-only $(CORE_SRC) >/dev/null 2>&1; then \
+		echo "ERROR: unsafe vehicle profile compiled without BSPD interface acknowledgement"; exit 1; \
+	else \
+		echo "PASS vehicle profile is locked without BSPD interface acknowledgement"; \
+	fi
+	$(CC) $(CFLAGS_COMMON) -DECU_BUILD_PROFILE=1 -DECU_BSPD_INTERFACE_3V3_VALIDATED=1 -fsyntax-only $(CORE_SRC)
+	@echo "PASS acknowledged vehicle profile compiles"
+
 clang-analyze: make-build-dir
 	$(CLANG) $(CFLAGS_COMMON) --analyze $(UNIT_SRC)
 	$(CLANG) $(CFLAGS_COMMON) --analyze $(SRC)
 	$(CLANG) $(CFLAGS_COMMON) --analyze $(SIL_SRC)
 
-ci: unit test system-sil analyze
+ci: unit test system-sil profile-gates analyze
 
 list:
 	@grep -R -E '^static void test_' src unit system | sed -E 's/^.*static void (test_[^(]+).*/\1/' | sort

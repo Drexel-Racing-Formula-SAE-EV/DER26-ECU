@@ -62,6 +62,11 @@ jobs:
       - name: Run ECU system SIL tests
         working-directory: host_tests
         run: make CC=gcc system-sil | tee system_sil_output.txt
+      - name: Verify build-profile safety gates
+        working-directory: host_tests
+        run: make CC=gcc profile-gates
+      - name: Type-check full ECU application in both profiles
+        run: bash ci/scripts/check_core_host_syntax.sh
       - name: Run ECU sanitizer tests
         working-directory: host_tests
         run: make CC=gcc asan

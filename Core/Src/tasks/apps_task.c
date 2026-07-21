@@ -50,10 +50,13 @@ void apps_task_fn(void *arg)
     canbus_packet_t tx_packet;
 
     float throttle_raw;
-    uint16_t throttle_hex;
+    float apps1_raw_percent;
+    float apps2_raw_percent;
+    int16_t torque_0p1nm;
     uint32_t entry;
     uint8_t disable_unlock_cycles = ECU_CM200_DISABLE_UNLOCK_CYCLES;
     bool torque_allowed;
+    bool adc_ok;
 
     tx_packet.id = CM_CANBUS_ID;
     ecu_cm200_build_disable_packet(tx_packet.data);
@@ -61,10 +64,13 @@ void apps_task_fn(void *arg)
     for(;;)
     {
         entry = osKernelGetTickCount();
+        data->apps_heartbeat_tick = entry;
 
-        apps1->count = stm32f767_adc_read(apps1->handle);
-        apps2->count = stm32f767_adc_read(apps2->handle);
+        adc_ok = ((stm32f767_adc_read_checked(apps1->handle, &apps1->count) == HAL_OK) &&
+                  (stm32f767_adc_read_checked(apps2->handle, &apps2->count) == HAL_OK));
 
+        apps1_raw_percent = poten_get_raw_percent(apps1);
+        apps2_raw_percent = poten_get_raw_percent(apps2);
         apps1->percent = poten_get_percent(apps1);
         apps2->percent = poten_get_percent(apps2);
 
@@ -76,7 +82,13 @@ void apps_task_fn(void *arg)
         data->throttle = (int)throttle_raw;
 
         /* T.4.2.5 (2022). */
-        if(!poten_check_plausibility(apps1->percent, apps2->percent, PLAUSIBILITY_THRESH, APPS_FREQ / 10))
+        /* Plausibility is evaluated on the current samples, not the moving
+         * average, so the filter cannot conceal a sensor split for 500 ms. */
+        if(!adc_ok)
+        {
+            data->apps_fault = true;
+        }
+        else if(!poten_check_plausibility(apps1_raw_percent, apps2_raw_percent, PLAUSIBILITY_THRESH, APPS_FREQ / 10))
         {
             data->apps_fault = true;
         }
@@ -109,28 +121,18 @@ void apps_task_fn(void *arg)
         torque_allowed = ecu_torque_allowed(&torque_inputs);
         tx_packet.id = CM_CANBUS_ID;
 
-        if(ecu_cm200_update_unlock(torque_allowed, &disable_unlock_cycles))
+        if(!ECU_OUTPUTS_INHIBITED && ecu_cm200_update_unlock(torque_allowed, &disable_unlock_cycles))
         {
-            throttle_hex = (uint16_t)(data->throttle * MAXTRQ / 10.0f); /* CM CANBus protocol scale. */
-            ecu_cm200_build_torque_packet(tx_packet.data, throttle_hex);
+            torque_0p1nm = (int16_t)((data->throttle * MAXTRQ) / 10); /* Nm*10. */
+            ecu_cm200_build_torque_packet(tx_packet.data, torque_0p1nm);
         }
         else
         {
             ecu_cm200_build_disable_packet(tx_packet.data);
         }
 
-        if(canbus_queue_tx(&data->board.canbus, &tx_packet) == HAL_OK)
-        {
-            if(data->canbus_task != NULL)
-            {
-                xTaskNotify(data->canbus_task, CANBUS_APPS, eSetBits);
-            }
-            else
-            {
-                data->canbus_tx_fault = true;
-            }
-        }
-        else
+        /* xQueueSend wakes the blocked CAN task; no separate notification is needed. */
+        if(canbus_queue_tx(&data->board.canbus, &tx_packet) != HAL_OK)
         {
             data->canbus_tx_fault = true;
         }

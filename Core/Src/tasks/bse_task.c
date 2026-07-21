@@ -47,23 +47,33 @@ void bse_task_fn(void *arg)
     float brake_raw;
     bool bse_range_ok;
     bool bse_plausible;
+    bool adc_ok;
     uint32_t entry;
 
     for(;;)
     {
         entry = osKernelGetTickCount();
+        data->bse_heartbeat_tick = entry;
 
         if(osMutexAcquire(data->board.stm32f767.adc3_mutex, ADC3_MUTEX_TIMEOUT_MS) == osOK)
         {
-            stm32f767_adc_switch_channel(bse1->handle, bse1->channel);
-            bse1->count = stm32f767_adc_read(bse1->handle);
-            stm32f767_adc_switch_channel(bse2->handle, bse2->channel);
-            bse2->count = stm32f767_adc_read(bse2->handle);
+            adc_ok = ((stm32f767_adc_switch_channel(bse1->handle, bse1->channel) == HAL_OK) &&
+                      (stm32f767_adc_read_checked(bse1->handle, &bse1->count) == HAL_OK) &&
+                      (stm32f767_adc_switch_channel(bse2->handle, bse2->channel) == HAL_OK) &&
+                      (stm32f767_adc_read_checked(bse2->handle, &bse2->count) == HAL_OK));
             osMutexRelease(data->board.stm32f767.adc3_mutex);
+            if(!adc_ok)
+            {
+                data->bse_fault = true;
+                set_brakelight(true);
+                osDelayUntil(entry + (1000 / BSE_FREQ));
+                continue;
+            }
         }
         else
         {
             data->bse_fault = true;
+            set_brakelight(true);
             osDelayUntil(entry + (1000 / BSE_FREQ));
             continue;
         }
@@ -80,7 +90,7 @@ void bse_task_fn(void *arg)
 
         brake_raw = (bse1->percent + bse2->percent) / 2.0f;
         data->brake = (int)brake_raw;
-        set_brakelight((data->brake >= BRAKE_LIGHT_THRESH));
+        set_brakelight(data->bse_fault || (data->brake >= BRAKE_LIGHT_THRESH));
 
         osDelayUntil(entry + (1000 / BSE_FREQ));
     }

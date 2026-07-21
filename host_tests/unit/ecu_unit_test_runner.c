@@ -30,6 +30,14 @@ static void make_packet(uint8_t frame[8], uint16_t header, uint16_t d0, uint16_t
     put_u16_be(&frame[6], d2);
 }
 
+static void feed_good_compact_summaries(ams_t *ams, uint32_t now_ms)
+{
+    const uint8_t electrical[8] = {0x0Cu, 0x80u, 0x00u, 0x00u, 0x0Bu, 0xB8u, 0x10u, 0x04u};
+    const uint8_t thermal[8] = {0x01u, 0x2Cu, 0x00u, 0xC8u, 0x00u, 0xFAu, 50u, 0u};
+    EXPECT_TRUE(ams_parse_can_frame(ams, AMS_ECU_ELECTRICAL_CANBUS_ID, true, 8u, electrical, now_ms));
+    EXPECT_TRUE(ams_parse_can_frame(ams, AMS_ECU_THERMAL_CANBUS_ID, true, 8u, thermal, now_ms));
+}
+
 static void poison_ams(ams_t *ams)
 {
     memset(ams, 0xA5, sizeof(*ams));
@@ -343,6 +351,7 @@ static void test_compact_status_frame_sets_torque_gate_fields(void)
     ams_init(&ams);
 
     EXPECT_TRUE(ams_parse_can_frame(&ams, AMS_ECU_STATUS_CANBUS_ID, true, 8u, frame, 100u));
+    feed_good_compact_summaries(&ams, 100u);
     EXPECT_TRUE(ams.compact_status_valid);
     EXPECT_EQ_U8(ams.compact_protocol_version, AMS_ECU_COMPACT_PROTOCOL_VERSION);
     EXPECT_EQ_U8(ams.compact_sequence, 0x42u);
@@ -362,7 +371,7 @@ static void test_compact_status_frame_sets_torque_gate_fields(void)
     EXPECT_EQ_U8(ams.temp_fault_reason, 0x22u);
     EXPECT_EQ_U8(ams.current_fault_reason, 0x33u);
     EXPECT_EQ_U32(ams.last_status_rx_tick, 100u);
-    EXPECT_EQ_U32(ams.rx_count, 1u);
+    EXPECT_EQ_U32(ams.rx_count, 3u);
     EXPECT_TRUE(ams_allows_torque(&ams));
 }
 
@@ -382,6 +391,7 @@ static void test_compact_status_fault_flags_block_torque(void)
     ams_init(&ams);
 
     EXPECT_TRUE(ams_parse_can_frame(&ams, AMS_ECU_STATUS_CANBUS_ID, true, 8u, frame, 10u));
+    feed_good_compact_summaries(&ams, 10u);
     EXPECT_TRUE(ams_allows_torque(&ams));
 
     frame[1] = 2u;
@@ -446,6 +456,7 @@ static void test_compact_status_drives_stale_and_sequence_checks(void)
     ams_init(&ams);
 
     EXPECT_TRUE(ams_parse_can_frame(&ams, AMS_ECU_STATUS_CANBUS_ID, true, 8u, status, 1000u));
+    feed_good_compact_summaries(&ams, 1000u);
     EXPECT_TRUE(ams_allows_torque(&ams));
 
     ams_update_stale(&ams, 1500u);
@@ -461,6 +472,7 @@ static void test_compact_status_drives_stale_and_sequence_checks(void)
 
     status[1] = 11u;
     EXPECT_TRUE(ams_parse_can_frame(&ams, AMS_ECU_STATUS_CANBUS_ID, true, 8u, status, 1601u));
+    feed_good_compact_summaries(&ams, 1601u);
     EXPECT_FALSE(ams.compact_sequence_repeated);
     EXPECT_TRUE(ams_allows_torque(&ams));
 
@@ -468,6 +480,50 @@ static void test_compact_status_drives_stale_and_sequence_checks(void)
     EXPECT_TRUE(ams.compact_sequence_repeated);
     EXPECT_FALSE(ams_allows_torque(&ams));
     EXPECT_EQ_U32(ams.compact_sequence_error_count, 1u);
+}
+
+static void test_compact_summary_freshness_thermal_and_sanity_gates(void)
+{
+    ams_t ams;
+    uint8_t status[8] = {AMS_ECU_COMPACT_PROTOCOL_VERSION, 1u, 1u, 0x71u, 0u, 0u, 0u, 0u};
+    uint8_t electrical[8] = {0x0Cu, 0x80u, 0u, 0u, 0x10u, 0u, 0x0Fu, 0u};
+    uint8_t thermal[8] = {0u, 100u, 0u, 50u, 0u, 75u, 50u, 0u};
+    ams_init(&ams);
+
+    EXPECT_TRUE(ams_parse_can_frame(&ams, AMS_ECU_STATUS_CANBUS_ID, true, 8u, status, 0u));
+    feed_good_compact_summaries(&ams, 0u);
+    EXPECT_TRUE(ams_allows_torque(&ams));
+
+    status[1] = 2u;
+    EXPECT_TRUE(ams_parse_can_frame(&ams, AMS_ECU_STATUS_CANBUS_ID, true, 8u, status, 501u));
+    ams_update_stale(&ams, 501u);
+    EXPECT_FALSE(ams.compact_status_stale);
+    EXPECT_TRUE(ams.compact_electrical_stale);
+    EXPECT_TRUE(ams.compact_thermal_stale);
+    EXPECT_FALSE(ams_allows_torque(&ams));
+
+    /* An inverted min/max electrical summary is received but not trusted. */
+    EXPECT_TRUE(ams_parse_can_frame(&ams, AMS_ECU_ELECTRICAL_CANBUS_ID, true, 8u, electrical, 501u));
+    EXPECT_FALSE(ams.compact_electrical_sane);
+    EXPECT_FALSE(ams_allows_torque(&ams));
+
+    feed_good_compact_summaries(&ams, 502u);
+    EXPECT_TRUE(ams_allows_torque(&ams));
+
+    thermal[7] = (uint8_t)(1u << AMS_THERMAL_OVERTEMP_FAULT_BIT);
+    EXPECT_TRUE(ams_parse_can_frame(&ams, AMS_ECU_THERMAL_CANBUS_ID, true, 8u, thermal, 503u));
+    EXPECT_FALSE(ams_allows_torque(&ams));
+
+    /* Warning, fan-max, charge-stop, pending, and fan diagnostic bits do not
+     * by themselves block motoring torque under the AMS contract. */
+    thermal[7] = 0x4Fu;
+    EXPECT_TRUE(ams_parse_can_frame(&ams, AMS_ECU_THERMAL_CANBUS_ID, true, 8u, thermal, 504u));
+    EXPECT_TRUE(ams_allows_torque(&ams));
+
+    thermal[6] = 101u;
+    EXPECT_TRUE(ams_parse_can_frame(&ams, AMS_ECU_THERMAL_CANBUS_ID, true, 8u, thermal, 505u));
+    EXPECT_FALSE(ams.compact_thermal_sane);
+    EXPECT_FALSE(ams_allows_torque(&ams));
 }
 
 static void test_compact_invalid_frames_rejected_without_mutation(void)
@@ -517,6 +573,7 @@ int main(void)
     run_test("compact status fault flags block torque", test_compact_status_fault_flags_block_torque);
     run_test("compact electrical thermal and health frames", test_compact_electrical_thermal_and_health_frames);
     run_test("compact status drives stale and sequence checks", test_compact_status_drives_stale_and_sequence_checks);
+    run_test("compact summary freshness thermal and sanity gates", test_compact_summary_freshness_thermal_and_sanity_gates);
     run_test("compact invalid frames rejected without mutation", test_compact_invalid_frames_rejected_without_mutation);
 
     if(failures != 0)

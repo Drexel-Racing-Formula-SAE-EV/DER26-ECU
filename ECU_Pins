@@ -1,76 +1,57 @@
-/* Pins */
+/* DER26 ECU firmware pin contract. Verify against the built .ioc and schematic. */
 
-/* Shutdown */
-IMD_Fail PF14
-BMS_Fail PF15
-BSPD_Fail PE13
-Fimrware_Ok PA7
+/* Shutdown and safety */
+IMD_Fail       PF14  active high; internal pull-up (disconnected = fault)
+BMS_Fail       PF15  active high; internal pull-up (disconnected = fault)
+BSPD_OK        PE13  active high at protected 3.3 V interface; internal pull-down
+Firmware_Ok    PA7   active high output; initializes low
+TSAL_HV_SIG    PC5   active high; internal pull-down
+RTD_Go         PE4   active-low button; internal pull-up
 
-/* Motor Controller */
-MTR_Fault PB2
-MTR_Ok PF12
-MTR_EN PF10
-CAN_RX PD0
-CAN_TX PD1
+/* Motor controller */
+MTR_Fault      PB2   active high; internal pull-up
+MTR_Ok         PF12  active low; internal pull-up
+MTR_EN         PF10  output; initializes low
+Cascadia_ON    PA5   output; initializes low
+CAN_RX         PD0
+CAN_TX         PD1
 
-/* Misc */
-TSAL_HV_SIG PC5
-Buzzer PF13
-Brake_Light PD14
+/* Driver and cooling outputs */
+Buzzer         PF13
+Brake_Light    PD14
+SSA_LED        PB1   TIM3_CH4
+CoolPump       PB8   TIM4_CH3
 
-/* Analog Inputs */
-ADC1 PA3 APPS1
-ADC2 PC0 APPS2
-ADC3(1) PC3 BSE1
-ADC3(2) PF3 BSE2
-ADC3(3) PF5 Temp1
-ADC3(4) PF4 Temp2
-ADC3(5) PF9 CoolPress
-ADC3(6) PA0 CoolFlow
-ADC3(7) PA1 NC
+/* Analog and captured inputs */
+APPS1          PA3   ADC1_IN3
+APPS2          PC0   ADC2_IN10
+BSE1           PC3   ADC3_IN13
+BSE2           PF3   ADC3_IN9
+CoolTemp1      PF5   ADC3_IN15
+CoolTemp2      PF4   ADC3_IN14
+CoolPress      PF9   ADC3_IN7
+CoolFlow       PA0   TIM5_CH1/CH2 capture path
 
-/* Generic IO */
-MISC_IO1 PC4
-MISC_IO2 PB1
-MISC_IO3 PA4
-MISC_IO4 PA5
-
-/* Generic In */
-GP_IN1 PF11 NC
-GP_IN2 PG0 NC
-GP_IN3 PG1 NC
-GP_IN4 PE7 NC
-
-/* Generic Out */
-GP_OUT1 PE4 RTD Go
-GP_OUT2 PD15 NC
-GP_OUT3 PE2 NC
-GP_OUT4 PE0 NC
-GP_OUT5 PB9 NC
-GP_OUT6 PB8 NC
-
-/* CLI USB */
-USART3_TX PD8
-USART3_RX PD9
+/* CLI USB UART */
+USART3_TX      PD8
+USART3_RX      PD9
 
 /* Dashboard */
-USART7_RX PF6
-USART7_TX PF7
+UART7_RX       PF6
+UART7_TX       PF7
 
-/* SD Card */
-SPI6_MISO PG12
-SPI6_MOSI PG14
-SPI6_SCK PG13
-SPI6_NSS PG8
+/* SD / SPI6 */
+SPI6_MISO      PG12
+SPI6_MOSI      PG14
+SPI6_SCK       PG13
+SPI6_NSS       PG8
 
 /* MPU6050 */
-I2C2_SDA PF0
-I2C2_SCL PF1
+I2C2_SDA       PF0
+I2C2_SCL       PF1
 
-/* Important Shit */
-PWRGD PF8
-NRTS
-BOOT0
-TCK_SWD PA14
-TMS_SWD PA13
-SWO_SWD PB3
+/* Programming and board management */
+TCK_SWD        PA14
+TMS_SWD        PA13
+SWO_SWD        PB3
+

@@ -12,7 +12,6 @@
 #include "main.h"
 #include "ext_drivers/stm32f767.h"
 #include "ext_drivers/canbus.h"
-#include <assert.h>
 
 const osMutexAttr_t can1_mutex_attr = {
 	.name = "CAN Bus Mutex",
@@ -77,59 +76,77 @@ void stm32f767_init(stm32f767_t *dev)
 	extern UART_HandleTypeDef huart7;
 	extern UART_HandleTypeDef huart3;
 
-	dev->hadc1 = hadc1;
-	dev->hadc2 = hadc2;
-	dev->hadc3 = hadc3;
-	dev->hcan1 = hcan1;
-	dev->hi2c2 = hi2c2;
-	dev->hrtc = hrtc;
-	dev->hspi6 = hspi6;
-	dev->htim3 = htim3;
-	dev->htim4 = htim4;
-	dev->htim5 = htim5;
-	dev->huart3 = huart3;
-	dev->huart7 = huart7;
+	if(dev == NULL)
+	{
+		return;
+	}
+
+	dev->hadc1 = &hadc1;
+	dev->hadc2 = &hadc2;
+	dev->hadc3 = &hadc3;
+	dev->hcan1 = &hcan1;
+	dev->hi2c2 = &hi2c2;
+	dev->hrtc = &hrtc;
+	dev->hspi6 = &hspi6;
+	dev->htim3 = &htim3;
+	dev->htim4 = &htim4;
+	dev->htim5 = &htim5;
+	dev->huart3 = &huart3;
+	dev->huart7 = &huart7;
 
 	dev->can1_mutex = osMutexNew(&can1_mutex_attr);
-	assert(dev->can1_mutex);
 
 	dev->adc3_mutex = osMutexNew(&adc3_mutex_attr);
-	assert(dev->adc3_mutex);
 
 	dev->i2c2_mutex = osMutexNew(&i2c2_mutex_attr);
-	assert(dev->i2c2_mutex);
 
 	dev->spi6_mutex = osMutexNew(&spi6_mutex_attr);
-	assert(dev->spi6_mutex);
 
 	dev->uart3_mutex = osMutexNew(&uart3_mutex_attr);
-	assert(dev->uart3_mutex);
 
 	dev->uart7_mutex = osMutexNew(&uart7_mutex_attr);
-	assert(dev->uart7_mutex);
+
+	dev->initialized = ((dev->can1_mutex != NULL) &&
+	                    (dev->adc3_mutex != NULL) &&
+	                    (dev->i2c2_mutex != NULL) &&
+	                    (dev->spi6_mutex != NULL) &&
+	                    (dev->uart3_mutex != NULL) &&
+	                    (dev->uart7_mutex != NULL));
 }
 
 uint16_t stm32f767_adc_read(ADC_HandleTypeDef *hadc)
 {
 	uint16_t count = 0u;
-
-	if(hadc == NULL)
-	{
-		return 0u;
-	}
-
-	if(HAL_ADC_Start(hadc) != HAL_OK)
-	{
-		return 0u;
-	}
-
-	if(HAL_ADC_PollForConversion(hadc, 10u) == HAL_OK)
-	{
-		count = HAL_ADC_GetValue(hadc);
-	}
-
-	(void)HAL_ADC_Stop(hadc);
+	(void)stm32f767_adc_read_checked(hadc, &count);
 	return count;
+}
+
+HAL_StatusTypeDef stm32f767_adc_read_checked(ADC_HandleTypeDef *hadc, uint16_t *count)
+{
+	HAL_StatusTypeDef status;
+
+	if((hadc == NULL) || (count == NULL))
+	{
+		return HAL_ERROR;
+	}
+
+	status = HAL_ADC_Start(hadc);
+	if(status != HAL_OK)
+	{
+		return status;
+	}
+
+	status = HAL_ADC_PollForConversion(hadc, 10u);
+	if(status == HAL_OK)
+	{
+		*count = (uint16_t)HAL_ADC_GetValue(hadc);
+	}
+
+	if((HAL_ADC_Stop(hadc) != HAL_OK) && (status == HAL_OK))
+	{
+		status = HAL_ERROR;
+	}
+	return status;
 }
 
 HAL_StatusTypeDef stm32f767_adc_switch_channel(ADC_HandleTypeDef *hadc, uint32_t channel)
@@ -142,6 +159,6 @@ HAL_StatusTypeDef stm32f767_adc_switch_channel(ADC_HandleTypeDef *hadc, uint32_t
 	ADC_ChannelConfTypeDef sConfig = {0};
 	sConfig.Channel = channel;
 	sConfig.Rank = ADC_REGULAR_RANK_1;
-	sConfig.SamplingTime = ADC_SAMPLETIME_3CYCLES;
+	sConfig.SamplingTime = ADC_SAMPLETIME_56CYCLES;
 	return HAL_ADC_ConfigChannel(hadc, &sConfig);
 }

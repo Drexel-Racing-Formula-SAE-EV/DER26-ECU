@@ -32,6 +32,10 @@ int get_brake(int argc, char *argv[]);
 int get_time(int argc, char *argv[]);
 int set_time(int argc, char *argv[]);
 int get_faults(int argc, char *argv[]);
+int get_status(int argc, char *argv[]);
+int get_ams_status(int argc, char *argv[]);
+int get_can_status(int argc, char *argv[]);
+int get_bspd_status(int argc, char *argv[]);
 int ssa(int argc, char *argv[]);
 int sd(int argc, char *argv[]);
 
@@ -42,6 +46,11 @@ command_t cmds[] =
 {
 	{"help", &help, "print help menu"},
 	{"id", &id, "identifies system"},
+	{"ver", &id, "firmware version, build profile, and output lock"},
+	{"status", &get_status, "critical ECU state and output summary"},
+	{"ams", &get_ams_status, "AMS compact-frame safety status"},
+	{"can", &get_can_status, "CAN error and CM200 counter status"},
+	{"bspd", &get_bspd_status, "BSPD raw-OK and decoded fault status"},
 	{"throttle", &get_throttle, "get the throttle percentage"},
 	{"brakelight", &get_brakelight, "get the brake light status"},
 	{"brake", &get_brake, "get the brake percentage"},
@@ -113,6 +122,11 @@ int cli_handle_cmd(int argc, char *argv[])
 	bool cmd_found = false;
 	int num_cmds = sizeof(cmds) / sizeof(command_t);
 
+	if((argc <= 0) || (argv == NULL) || (argv[0] == NULL))
+	{
+		return 0;
+	}
+
 	for(i = 0; i < num_cmds; i++)
 	{
 		if(!strncmp(cmds[i].name, argv[0], CLI_LINESZ))
@@ -153,6 +167,101 @@ int help(int argc, char *argv[])
 int id(int argc, char *argv[])
 {
     snprintf(outline, CLI_LINESZ, "DER ECU FW V%d.%d.%d", VER_MAJOR, VER_MINOR, VER_BUG);
+	cli_printline(cli, outline);
+	snprintf(outline, CLI_LINESZ, "profile:%s outputs_inhibited:%u bspd_3v3_validated:%u",
+	         (ECU_BUILD_PROFILE == ECU_BUILD_PROFILE_VEHICLE) ? "vehicle" : "bench",
+	         (unsigned)ECU_OUTPUTS_INHIBITED,
+	         (unsigned)ECU_BSPD_INTERFACE_3V3_VALIDATED);
+	cli_printline(cli, outline);
+	snprintf(outline, CLI_LINESZ, "reset_cause:0x%08lX watchdog:%u",
+	         (unsigned long)data->reset_cause, (unsigned)ECU_ENABLE_IWDG);
+	cli_printline(cli, outline);
+	return 0;
+}
+
+int get_status(int argc, char *argv[])
+{
+	(void)argc;
+	(void)argv;
+	snprintf(outline, CLI_LINESZ,
+	         "RTD:%u torque:%d brake:%d hard:%u soft:%u startup:%u hb:%u",
+	         (unsigned)data->rtd_mode, data->throttle, data->brake,
+	         (unsigned)data->hard_fault, (unsigned)data->soft_fault,
+	         (unsigned)data->startup_fault, (unsigned)data->task_heartbeat_fault);
+	cli_printline(cli, outline);
+	snprintf(outline, CLI_LINESZ,
+	         "OUT fw_ok:%u mtr_en:%u mtr_on:%u inhibited:%u",
+	         (unsigned)data->fw_state, (unsigned)data->cascadia_en,
+	         (unsigned)data->cascadia_on, (unsigned)ECU_OUTPUTS_INHIBITED);
+	cli_printline(cli, outline);
+	return 0;
+}
+
+int get_ams_status(int argc, char *argv[])
+{
+	ams_t snap;
+	(void)argc;
+	(void)argv;
+	taskENTER_CRITICAL();
+	memcpy(&snap, &data->board.ams, sizeof(snap));
+	taskEXIT_CRITICAL();
+
+	snprintf(outline, CLI_LINESZ,
+	         "AMS allow:%u stale:%u S/E/T:%u/%u/%u seq:%u seqfault:%u",
+	         (unsigned)ams_allows_torque(&snap), (unsigned)snap.stale,
+	         (unsigned)snap.compact_status_valid,
+	         (unsigned)snap.compact_electrical_valid,
+	         (unsigned)snap.compact_thermal_valid,
+	         (unsigned)snap.compact_sequence,
+	         (unsigned)snap.compact_sequence_fault);
+	cli_printline(cli, outline);
+	snprintf(outline, CLI_LINESZ,
+	         "AMS bms_ok:%u inhibit:%u flags:%02X/%02X thermal:%02X",
+	         (unsigned)snap.bms_ok, (unsigned)snap.bms_inhibited,
+	         (unsigned)snap.compact_status_flags,
+	         (unsigned)snap.compact_fault_flags,
+	         (unsigned)snap.thermal_flags);
+	cli_printline(cli, outline);
+	snprintf(outline, CLI_LINESZ,
+	         "AMS V:%u.%uV I:%d.%uA cell:%u..%umV temp:%d..%d dC",
+	         (unsigned)(snap.pack_voltage_0p1v / 10u),
+	         (unsigned)(snap.pack_voltage_0p1v % 10u),
+	         (int)(snap.pack_current_0p1a / 10),
+	         (unsigned)((snap.pack_current_0p1a < 0 ? -snap.pack_current_0p1a : snap.pack_current_0p1a) % 10),
+	         (unsigned)snap.min_cell_mv, (unsigned)snap.max_cell_mv,
+	         (int)snap.min_temp_0p1c, (int)snap.max_temp_0p1c);
+	cli_printline(cli, outline);
+	return 0;
+}
+
+int get_can_status(int argc, char *argv[])
+{
+	(void)argc;
+	(void)argv;
+	snprintf(outline, CLI_LINESZ,
+	         "CAN fault:%u rx:%u tx:%u hw:%u err:0x%08lX",
+	         (unsigned)data->canbus_fault, (unsigned)data->canbus_rx_fault,
+	         (unsigned)data->canbus_tx_fault, (unsigned)data->canbus_hw_fault,
+	         (unsigned long)data->can_error_code);
+	cli_printline(cli, outline);
+	snprintf(outline, CLI_LINESZ,
+	         "CAN dropped:%lu overruns:%lu recoveries:%lu cm_counter:%u",
+	         (unsigned long)data->board.canbus.tx_dropped_count,
+	         (unsigned long)data->can_rx_overrun_count,
+	         (unsigned long)data->can_recovery_count,
+	         (unsigned)data->cm200_rolling_counter);
+	cli_printline(cli, outline);
+	return 0;
+}
+
+int get_bspd_status(int argc, char *argv[])
+{
+	(void)argc;
+	(void)argv;
+	snprintf(outline, CLI_LINESZ,
+	         "BSPD net:BSPD_OK raw:%u decoded_fault:%u interface_3v3:%u",
+	         (unsigned)data->bspd_ok_raw, (unsigned)data->bspd_fail,
+	         (unsigned)ECU_BSPD_INTERFACE_3V3_VALIDATED);
 	cli_printline(cli, outline);
 	return 0;
 }
@@ -271,7 +380,7 @@ int get_faults(int argc, char *argv[])
 
 int ssa(int argc, char *argv[])
 {
-	int ret;
+	int ret = 0;
 	if(argc == 1)
 	{
 		snprintf(outline, CLI_LINESZ, "%d%%", (int)(TIM3->CCR4 * 100 / 65535));
@@ -309,6 +418,8 @@ int sd(int argc, char *argv[])
 	snprintf(outline, CLI_LINESZ, "imd fail:  %d", data->imd_fail);
 	ret |= cli_printline(cli, outline);
 	snprintf(outline, CLI_LINESZ, "bspd fail: %d", data->bspd_fail);
+	ret |= cli_printline(cli, outline);
+	snprintf(outline, CLI_LINESZ, "bspd raw OK: %d", data->bspd_ok_raw);
 	ret |= cli_printline(cli, outline);
 	snprintf(outline, CLI_LINESZ, "fw fail:   %d", !data->fw_state);
 	ret |= cli_printline(cli, outline);

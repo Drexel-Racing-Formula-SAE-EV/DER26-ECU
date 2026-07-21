@@ -24,6 +24,7 @@ typedef struct {
 	uint16_t count;
 	float percent;
 	float hist[HISTSZ];
+	uint8_t hist_count;
 
 	ADC_HandleTypeDef *handle;
 } poten_t;
@@ -31,6 +32,7 @@ typedef struct {
 void poten_init(poten_t *poten, uint16_t min, uint16_t max, ADC_HandleTypeDef *handle);
 
 float poten_get_percent(poten_t *root);
+float poten_get_raw_percent(const poten_t *root);
 
 uint16_t poten_percent_to_hex(float percent);
 

@@ -149,11 +149,12 @@ static void test_compact_status_and_electrical_parse(void)
     ams_t ams;
     uint8_t status[8] = {AMS_ECU_COMPACT_PROTOCOL_VERSION, 1u, 2u, 0x71u, 0u, 0u, 0u, 0u};
     uint8_t electrical[8] = {0x0Cu, 0x80u, 0x00u, 0x7Bu, 0x0Bu, 0xEAu, 0x10u, 0x68u};
+    uint8_t thermal[8] = {0x01u, 0x2Cu, 0x00u, 0xC8u, 0x00u, 0xFAu, 50u, 0u};
     ams_init(&ams);
 
     EXPECT_TRUE(ams_parse_can_frame(&ams, AMS_ECU_STATUS_CANBUS_ID, true, 8u, status, 100u));
     EXPECT_TRUE(ams.compact_status_valid);
-    EXPECT_TRUE(ams_allows_torque(&ams));
+    EXPECT_FALSE(ams_allows_torque(&ams));
     EXPECT_EQ_U8(ams.compact_sequence, 1u);
     EXPECT_EQ_U8(ams.compact_state, 2u);
 
@@ -163,6 +164,10 @@ static void test_compact_status_and_electrical_parse(void)
     EXPECT_EQ_I16(ams.pack_current_0p1a, 123);
     EXPECT_EQ_U16(ams.min_cell_mv, 3050u);
     EXPECT_EQ_U16(ams.max_cell_mv, 4200u);
+    EXPECT_FALSE(ams_allows_torque(&ams));
+
+    EXPECT_TRUE(ams_parse_can_frame(&ams, AMS_ECU_THERMAL_CANBUS_ID, true, 8u, thermal, 120u));
+    EXPECT_TRUE(ams_allows_torque(&ams));
 }
 
 static void run_test(const char *name, void (*fn)(void))

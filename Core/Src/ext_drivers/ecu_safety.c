@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "ext_drivers/ecu_safety.h"
+#include "ecu_config.h"
 
 #define TO_LSB_U16(x) ((uint8_t)((x) & 0xFFu))
 #define TO_MSB_U16(x) ((uint8_t)(((x) >> 8u) & 0xFFu))
@@ -168,6 +169,61 @@ bool ecu_torque_allowed(const ecu_torque_inputs_t *inputs)
             !inputs->bspd_fail);
 }
 
+void ecu_discrete_filter_init(ecu_discrete_filter_t *filter)
+{
+    if(filter == NULL)
+    {
+        return;
+    }
+
+    filter->initialized = true;
+    filter->faulted = true;
+    filter->healthy_samples = 0u;
+}
+
+bool ecu_discrete_fault_update(ecu_discrete_filter_t *filter,
+                               bool raw_fault,
+                               uint8_t clear_samples)
+{
+    if(filter == NULL)
+    {
+        return true;
+    }
+
+    if(!filter->initialized)
+    {
+        ecu_discrete_filter_init(filter);
+    }
+
+    if(raw_fault || (clear_samples == 0u))
+    {
+        filter->faulted = true;
+        filter->healthy_samples = 0u;
+        return true;
+    }
+
+    if(filter->healthy_samples < clear_samples)
+    {
+        filter->healthy_samples++;
+    }
+
+    if(filter->healthy_samples >= clear_samples)
+    {
+        filter->faulted = false;
+    }
+
+    return filter->faulted;
+}
+
+bool ecu_bspd_raw_is_fault(bool raw_pin_high)
+{
+#if ECU_BSPD_OK_ACTIVE_HIGH
+    return !raw_pin_high;
+#else
+    return raw_pin_high;
+#endif
+}
+
 void ecu_cm200_build_disable_packet(uint8_t data[ECU_CM200_DATALEN])
 {
     if(data == NULL)
@@ -176,26 +232,47 @@ void ecu_cm200_build_disable_packet(uint8_t data[ECU_CM200_DATALEN])
     }
 
     memset(data, 0, ECU_CM200_DATALEN);
-    data[4] = 0u; /* Direction field. Keep disabled while zero torque. */
+    /* Do not change direction during a disable transition; CM200 treats a
+     * direction change while enabled as a lockout condition. */
+    data[4] = ECU_CM200_FORWARD_DIRECTION;
     data[5] = 0u; /* Inverter enable bit = disabled. */
 }
 
-void ecu_cm200_build_torque_packet(uint8_t data[ECU_CM200_DATALEN], uint16_t torque_cmd)
+void ecu_cm200_build_torque_packet(uint8_t data[ECU_CM200_DATALEN], int16_t torque_cmd)
 {
+    uint16_t encoded;
+
     if(data == NULL)
     {
         return;
     }
 
     memset(data, 0, ECU_CM200_DATALEN);
-    data[0] = TO_LSB_U16(torque_cmd);
-    data[1] = TO_MSB_U16(torque_cmd);
+    encoded = (uint16_t)torque_cmd;
+    data[0] = TO_LSB_U16(encoded);
+    data[1] = TO_MSB_U16(encoded);
     data[2] = 0u;
     data[3] = 0u;
-    data[4] = 1u; /* Direction: 0-backward, 1-forward; motor is mounted backwards. */
+    data[4] = ECU_CM200_FORWARD_DIRECTION;
     data[5] = 1u; /* Inverter Enable: 0-disable, 1-enable. */
     data[6] = 0u;
     data[7] = 0u;
+}
+
+void ecu_cm200_apply_rolling_counter(uint8_t data[ECU_CM200_DATALEN], uint8_t rolling_counter)
+{
+    if(data == NULL)
+    {
+        return;
+    }
+
+    data[5] = (uint8_t)((data[5] & ECU_CM200_CONTROL_MASK) |
+                       (uint8_t)((rolling_counter & 0x0Fu) << 4u));
+}
+
+uint8_t ecu_cm200_next_rolling_counter(uint8_t rolling_counter)
+{
+    return (uint8_t)((rolling_counter + 1u) & 0x0Fu);
 }
 
 bool ecu_cm200_update_unlock(bool torque_allowed, uint8_t *disable_unlock_cycles)
@@ -218,4 +295,9 @@ bool ecu_cm200_update_unlock(bool torque_allowed, uint8_t *disable_unlock_cycles
     }
 
     return true;
+}
+
+bool ecu_heartbeat_expired(uint32_t last_tick, uint32_t now_tick, uint32_t max_age_ms)
+{
+    return ((uint32_t)(now_tick - last_tick) > max_age_ms);
 }

@@ -12,6 +12,8 @@
 #ifndef __CANBUS_H_
 #define __CANBUS_H_
 
+#include <stdbool.h>
+
 #include "cmsis_os.h"
 #include "FreeRTOS.h"
 #include "queue.h"
@@ -31,9 +33,9 @@ typedef struct {
     CAN_TxHeaderTypeDef *tx_header;
     uint32_t tx_mailbox;
     canbus_packet_t rx_packet;
-    canbus_packet_t tx_packet; /* Legacy single-slot path; prefer tx_queue for new code. */
     QueueHandle_t tx_queue;
     uint32_t tx_dropped_count;
+    bool started;
 } canbus_t;
 
 void canbus_device_init(canbus_t *dev, CAN_HandleTypeDef *hcan, CAN_TxHeaderTypeDef *tx_header);

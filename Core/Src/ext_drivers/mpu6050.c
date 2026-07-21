@@ -14,6 +14,12 @@ int mpu6050_init(mpu6050_t *dev, mpu6050_config_t *conf, I2C_HandleTypeDef *hi2c
 	uint8_t temp_data;
 	HAL_StatusTypeDef ret = 0;
 
+	if((dev == NULL) || (conf == NULL) || (hi2c == NULL) ||
+	   ((unsigned)conf->gyro_scale >= 4u) || ((unsigned)conf->acc_scale >= 4u))
+	{
+		return HAL_ERROR;
+	}
+
 	dev->addr_7bit = conf->addr_7bit;
 	dev->hi2c = hi2c;
 	dev->temp = 0.0;
@@ -26,23 +32,23 @@ int mpu6050_init(mpu6050_t *dev, mpu6050_config_t *conf, I2C_HandleTypeDef *hi2c
 	dev->gyro_div = GRYO_DIVS[conf->gyro_scale];
 	dev->acc_div = ACC_DIVS[conf->acc_scale];
 
-	ret |= HAL_I2C_IsDeviceReady(dev->hi2c, (dev->addr_7bit << 1), 100, 100);
+	ret |= HAL_I2C_IsDeviceReady(dev->hi2c, (dev->addr_7bit << 1), 3u, 50u);
 
 	temp_data = conf->sample_rate_divisor;
-	ret |= HAL_I2C_Mem_Write(dev->hi2c, (dev->addr_7bit << 1), REG_SMPLRT_DIV, I2C_MEMADD_SIZE_8BIT, &temp_data, 1, 200);
+	ret |= HAL_I2C_Mem_Write(dev->hi2c, (dev->addr_7bit << 1), REG_SMPLRT_DIV, I2C_MEMADD_SIZE_8BIT, &temp_data, 1, 50u);
 
 	temp_data = conf->lowpass_filter;
 	temp_data |= conf->external_sync << 3;
-	ret |= HAL_I2C_Mem_Write(dev->hi2c, (dev->addr_7bit << 1), REG_CONFIG, 1, &temp_data, 1, 200);
+	ret |= HAL_I2C_Mem_Write(dev->hi2c, (dev->addr_7bit << 1), REG_CONFIG, I2C_MEMADD_SIZE_8BIT, &temp_data, 1, 50u);
 
 	temp_data = conf->gyro_scale << 3;
-	ret |= HAL_I2C_Mem_Write(dev->hi2c, (dev->addr_7bit << 1), REG_CONFIG_GYRO, 1, &temp_data, 1, 200);
+	ret |= HAL_I2C_Mem_Write(dev->hi2c, (dev->addr_7bit << 1), REG_CONFIG_GYRO, I2C_MEMADD_SIZE_8BIT, &temp_data, 1, 50u);
 
 	temp_data = conf->acc_scale << 3;
-	ret |= HAL_I2C_Mem_Write(dev->hi2c, (dev->addr_7bit << 1), REG_CONFIG_ACC, 1, &temp_data, 1, 200);
+	ret |= HAL_I2C_Mem_Write(dev->hi2c, (dev->addr_7bit << 1), REG_CONFIG_ACC, I2C_MEMADD_SIZE_8BIT, &temp_data, 1, 50u);
 
 	temp_data = conf->clock;
-	ret |= HAL_I2C_Mem_Write(dev->hi2c, (dev->addr_7bit << 1), REG_USR_CTRL, 1, &temp_data, 1, 200);
+	ret |= HAL_I2C_Mem_Write(dev->hi2c, (dev->addr_7bit << 1), REG_PWR_MGMT_1, I2C_MEMADD_SIZE_8BIT, &temp_data, 1, 50u);
 
 	return ret;
 }
@@ -50,16 +56,33 @@ int mpu6050_init(mpu6050_t *dev, mpu6050_config_t *conf, I2C_HandleTypeDef *hi2c
 int mpu6050_read(mpu6050_t *dev){
 	HAL_StatusTypeDef ret;
 	uint8_t data[14] = {0};
+	int16_t x_accR;
+	int16_t y_accR;
+	int16_t z_accR;
+	int16_t tempR;
+	int16_t x_gyroR;
+	int16_t y_gyroR;
+	int16_t z_gyroR;
+
+	if((dev == NULL) || (dev->hi2c == NULL) || (dev->acc_div == 0.0f) || (dev->gyro_div == 0.0f))
+	{
+		return HAL_ERROR;
+	}
 
 	ret = HAL_I2C_Mem_Read(dev->hi2c, (dev->addr_7bit << 1), ACCEL_XOUT_H, 1, data, 14, 200);
 	dev->error = ret;
-    int x_accR = ((int)data[0] << 8) | data[1];
-    int y_accR = ((int)data[2] << 8) | data[3];
-    int z_accR = ((int)data[4] << 8) | data[5];
-    int tempR  = ((int)data[6] << 8) | data[7];
-    int x_gyroR = ((int)data[8] << 8) | data[9];
-    int y_gyroR = ((int)data[10] << 8) | data[11];
-    int z_gyroR = ((int)data[12] << 8) | data[13];
+    if(ret != HAL_OK)
+    {
+        return ret;
+    }
+
+    x_accR = (int16_t)(((uint16_t)data[0] << 8u) | data[1]);
+    y_accR = (int16_t)(((uint16_t)data[2] << 8u) | data[3]);
+    z_accR = (int16_t)(((uint16_t)data[4] << 8u) | data[5]);
+    tempR = (int16_t)(((uint16_t)data[6] << 8u) | data[7]);
+    x_gyroR = (int16_t)(((uint16_t)data[8] << 8u) | data[9]);
+    y_gyroR = (int16_t)(((uint16_t)data[10] << 8u) | data[11]);
+    z_gyroR = (int16_t)(((uint16_t)data[12] << 8u) | data[13]);
     dev->x_acc = (float)x_accR/ dev->acc_div;
     dev->y_acc = (float)y_accR / dev->acc_div;
     dev->z_acc = (float)z_accR / dev->acc_div;

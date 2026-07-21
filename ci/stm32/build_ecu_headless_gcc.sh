@@ -3,6 +3,13 @@ set -euo pipefail
 
 ROOT_DIR="$(pwd)"
 BUILD_DIR="$ROOT_DIR/build"
+ECU_BUILD_PROFILE="${ECU_BUILD_PROFILE:-0}"
+ECU_BSPD_INTERFACE_3V3_VALIDATED="${ECU_BSPD_INTERFACE_3V3_VALIDATED:-0}"
+
+if [[ "$ECU_BUILD_PROFILE" != "0" && "$ECU_BUILD_PROFILE" != "1" ]]; then
+  echo "ECU_BUILD_PROFILE must be 0 (bench) or 1 (vehicle)"
+  exit 1
+fi
 
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
@@ -24,6 +31,8 @@ CFLAGS=(
   -DDEBUG
   -DUSE_HAL_DRIVER
   -DSTM32F767xx
+  "-DECU_BUILD_PROFILE=${ECU_BUILD_PROFILE}"
+  "-DECU_BSPD_INTERFACE_3V3_VALIDATED=${ECU_BSPD_INTERFACE_3V3_VALIDATED}"
 )
 
 INCLUDES=(
@@ -66,7 +75,7 @@ for src in "${FREERTOS_SOURCES[@]}"; do
 done
 
 OBJECTS=()
-echo "Compiling ${#SOURCES[@]} C files..."
+echo "Compiling ${#SOURCES[@]} C files (ECU profile ${ECU_BUILD_PROFILE})..."
 for src in "${SOURCES[@]}"; do
   rel="${src#$ROOT_DIR/}"
   obj="$BUILD_DIR/${rel//\//_}.o"

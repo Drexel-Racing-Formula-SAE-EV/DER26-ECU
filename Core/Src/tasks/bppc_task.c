@@ -49,6 +49,7 @@ void bppc_task_fn(void *arg)
 	for(;;)
 	{
 		entry = osKernelGetTickCount();
+		data->bppc_heartbeat_tick = entry;
 
 		// EV.4.7.1 (2024)
 		brakesEnganged   = (data->brake > BPPC_BSE_THRESH);

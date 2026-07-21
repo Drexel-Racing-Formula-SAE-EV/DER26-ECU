@@ -11,9 +11,8 @@
 
 #include "tasks/rtd_task.h"
 #include "main.h"
+#include "ecu_config.h"
 #include "ext_drivers/ecu_safety.h"
-
-#define TRIP_DELAY 100u
 
 /**
 * @brief Actual RTD task function
@@ -49,10 +48,14 @@ void rtd_task_fn(void *arg)
     for(;;)
     {
         entry = osKernelGetTickCount();
+        data->rtd_heartbeat_tick = entry;
 
-        data->tsal = HAL_GPIO_ReadPin(TSAL_HV_SIG_GPIO_Port, TSAL_HV_SIG_Pin);
-        data->rtd_button = !HAL_GPIO_ReadPin(RTD_Go_GPIO_Port, RTD_Go_Pin);
-        data->cascadia_ok = !HAL_GPIO_ReadPin(MTR_Ok_GPIO_Port, MTR_Ok_Pin);
+        const bool tsal_raw = (HAL_GPIO_ReadPin(TSAL_HV_SIG_GPIO_Port, TSAL_HV_SIG_Pin) == GPIO_PIN_SET);
+        const bool button_raw = (HAL_GPIO_ReadPin(RTD_Go_GPIO_Port, RTD_Go_Pin) == GPIO_PIN_SET);
+        const bool mtr_ok_raw = (HAL_GPIO_ReadPin(MTR_Ok_GPIO_Port, MTR_Ok_Pin) == GPIO_PIN_SET);
+        data->tsal = ECU_TSAL_ACTIVE_HIGH ? tsal_raw : !tsal_raw;
+        data->rtd_button = ECU_RTD_BUTTON_ACTIVE_LOW ? !button_raw : button_raw;
+        data->cascadia_ok = ECU_MTR_OK_ACTIVE_LOW ? !mtr_ok_raw : mtr_ok_raw;
 
         const ecu_rtd_inputs_t inputs = {
             .tsal = data->tsal,
@@ -81,10 +84,8 @@ void rtd_task_fn(void *arg)
 
         if(step.trip_pulse_requested)
         {
-            override_ecu_ok(false);
-            apply_ecu_ok_override(true);
-            osDelay(TRIP_DELAY);
-            apply_ecu_ok_override(false);
+            /* ERROR task is the sole owner of shutdown outputs. */
+            data->rtd_trip_pulse_requested = true;
         }
 
         osDelayUntil(entry + (1000 / RTD_FREQ));

@@ -11,6 +11,9 @@
 
 #include "tasks/cool_task.h"
 #include "main.h"
+#include "ecu_config.h"
+
+#include <math.h>
 
 #define BV2000_350_PPL 750
 #define ADC3_MUTEX_TIMEOUT_MS 10u
@@ -59,6 +62,8 @@ void cool_task_fn(void *arg)
     float press_voltage;
 
     uint32_t entry;
+    uint8_t adc_mutex_failures = 0u;
+    bool adc_ok;
 
     for(;;)
     {
@@ -67,33 +72,56 @@ void cool_task_fn(void *arg)
         /* TODO: Finish calibrating coolant sensors. ADC3 is shared with brake sensors, so this block is mutexed. */
         if(osMutexAcquire(data->board.stm32f767.adc3_mutex, ADC3_MUTEX_TIMEOUT_MS) == osOK)
         {
-            stm32f767_adc_switch_channel(press->handle, press->channel);
-            press->count = stm32f767_adc_read(press->handle);
+            adc_ok = ((stm32f767_adc_switch_channel(press->handle, press->channel) == HAL_OK) &&
+                      (stm32f767_adc_read_checked(press->handle, &press->count) == HAL_OK));
             press->percent = pressure_sensor_get_percent(press);
             press_voltage = press->count * 3.3f / 4095.0f * 3.0f / 2.0f;
             data->coolant_pressure = walfront_pressure_convert(press_voltage);
 
-            stm32f767_adc_switch_channel(temp1->hadc, temp1->channel);
-            temp1->count = stm32f767_adc_read(temp1->hadc);
+            adc_ok = (adc_ok &&
+                      (stm32f767_adc_switch_channel(temp1->hadc, temp1->channel) == HAL_OK) &&
+                      (stm32f767_adc_read_checked(temp1->hadc, &temp1->count) == HAL_OK));
             temp1->temp = SEN_04_5_convert(temp1->count);
             data->coolant_temp_in = temp1->temp;
 
-            stm32f767_adc_switch_channel(temp2->hadc, temp2->channel);
-            temp2->count = stm32f767_adc_read(temp2->hadc);
+            adc_ok = (adc_ok &&
+                      (stm32f767_adc_switch_channel(temp2->hadc, temp2->channel) == HAL_OK) &&
+                      (stm32f767_adc_read_checked(temp2->hadc, &temp2->count) == HAL_OK));
             temp2->temp = SEN_04_5_convert(temp2->count);
             data->coolant_temp_out = temp2->temp;
 
+            /* Temperature transfer function is not yet calibrated.  Keep the
+             * measurements visible as invalid instead of labelling volts as C. */
+            data->coolant_telemetry_valid = false;
+
             osMutexRelease(data->board.stm32f767.adc3_mutex);
+            if(adc_ok)
+            {
+                adc_mutex_failures = 0u;
+                data->coolant_fault = false;
+            }
+            else
+            {
+                if(adc_mutex_failures < 3u)
+                {
+                    adc_mutex_failures++;
+                }
+                data->coolant_fault = (adc_mutex_failures >= 3u);
+            }
         }
         else
         {
-            data->coolant_fault = true;
+            if(adc_mutex_failures < 3u)
+            {
+                adc_mutex_failures++;
+            }
+            data->coolant_fault = (adc_mutex_failures >= 3u);
         }
 
         data->coolant_flow = BV2000_350_convert(flow->freq);
 
-        /* TODO: determine pump speed requirements. */
-        pwm_set_percent(pump, 50);
+        /* Fail toward maximum coolant circulation until control calibration is closed. */
+        pwm_set_percent(pump, ECU_COOLANT_PUMP_DEFAULT_PERCENT);
 
         /* data->coolant_fault = check_coolant_fault(data); */
 
@@ -111,11 +139,8 @@ bool check_coolant_fault(app_data_t *data)
 
 float SEN_04_5_convert(uint16_t count)
 {
-    float voltage = (float)count * 3.3f / 4095.0f;
-    voltage = voltage * 3.0f / 2.0f;
-
-    float temp = voltage; /* TODO: replace with real conversion func. */
-    return temp;
+    (void)count;
+    return NAN;
 }
 
 float BV2000_350_convert(float freq)

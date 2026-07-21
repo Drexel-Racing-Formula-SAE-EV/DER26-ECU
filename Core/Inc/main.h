@@ -110,8 +110,8 @@ void MX_TIM4_Init(void);
 #define IMD_Fail_GPIO_Port GPIOF
 #define BMS_Fail_Pin GPIO_PIN_15
 #define BMS_Fail_GPIO_Port GPIOF
-#define BSPD_Fail_Pin GPIO_PIN_13
-#define BSPD_Fail_GPIO_Port GPIOE
+#define BSPD_OK_Pin GPIO_PIN_13
+#define BSPD_OK_GPIO_Port GPIOE
 #define Brake_Light_Pin GPIO_PIN_14
 #define Brake_Light_GPIO_Port GPIOD
 #define SPI6_NSS_Pin GPIO_PIN_8

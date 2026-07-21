@@ -78,6 +78,7 @@ void NMI_Handler(void)
 {
   /* USER CODE BEGIN NonMaskableInt_IRQn 0 */
 
+  ecu_force_safe_outputs();
   /* USER CODE END NonMaskableInt_IRQn 0 */
   /* USER CODE BEGIN NonMaskableInt_IRQn 1 */
    while (1)
@@ -93,6 +94,7 @@ void HardFault_Handler(void)
 {
   /* USER CODE BEGIN HardFault_IRQn 0 */
 
+  ecu_force_safe_outputs();
   /* USER CODE END HardFault_IRQn 0 */
   while (1)
   {
@@ -108,6 +110,7 @@ void MemManage_Handler(void)
 {
   /* USER CODE BEGIN MemoryManagement_IRQn 0 */
 
+  ecu_force_safe_outputs();
   /* USER CODE END MemoryManagement_IRQn 0 */
   while (1)
   {
@@ -123,6 +126,7 @@ void BusFault_Handler(void)
 {
   /* USER CODE BEGIN BusFault_IRQn 0 */
 
+  ecu_force_safe_outputs();
   /* USER CODE END BusFault_IRQn 0 */
   while (1)
   {
@@ -138,6 +142,7 @@ void UsageFault_Handler(void)
 {
   /* USER CODE BEGIN UsageFault_IRQn 0 */
 
+  ecu_force_safe_outputs();
   /* USER CODE END UsageFault_IRQn 0 */
   while (1)
   {
@@ -242,7 +247,7 @@ void UART7_IRQHandler(void)
   /* USER CODE BEGIN UART7_IRQn 0 */
 	extern app_data_t app;
 
-	UART_HandleTypeDef *huart7 = &app.board.stm32f767.huart7;
+	UART_HandleTypeDef *huart7 = app.board.stm32f767.huart7;
 #if 0
   /* USER CODE END UART7_IRQn 0 */
   HAL_UART_IRQHandler(&huart7);
@@ -338,11 +343,30 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
     }
 }
 
+void HAL_CAN_ErrorCallback(CAN_HandleTypeDef *hcan)
+{
+    extern app_data_t app;
+
+    if((app.board.canbus.hcan == NULL) || (hcan != app.board.canbus.hcan))
+    {
+        return;
+    }
+
+    app.can_error_code = HAL_CAN_GetError(hcan);
+    app.canbus_hw_fault = true;
+    if((app.can_error_code & HAL_CAN_ERROR_RX_FOV0) != 0u)
+    {
+        app.can_rx_overrun_count++;
+        app.canbus_rx_fault = true;
+    }
+}
+
 void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim) {
 	extern app_data_t app;
 	flow_sensor_t *cool_flow = &app.board.cool_flow;
 
-	if(htim->Instance == cool_flow->htim->Instance){
+	if((htim != NULL) && (cool_flow->htim != NULL) &&
+	   (htim->Instance == cool_flow->htim->Instance)){
 		flow_sensor_read(cool_flow);
 	}
 }

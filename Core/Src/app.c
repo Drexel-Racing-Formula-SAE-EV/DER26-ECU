@@ -22,12 +22,41 @@
 #include "tasks/acc_task.h"
 #include "tasks/dashboard_task.h"
 #include "tasks/cool_task.h"
-#include <assert.h>
 
 app_data_t app = {0};
 
+void ecu_force_safe_outputs(void)
+{
+    /* Direct BSRR writes are deterministic and do not depend on scheduler or
+     * HAL state. They are also harmless if invoked before GPIO clocks start. */
+    Firmware_Ok_GPIO_Port->BSRR = ((uint32_t)Firmware_Ok_Pin << 16u);
+    MTR_EN_GPIO_Port->BSRR = ((uint32_t)MTR_EN_Pin << 16u);
+    Cascadia_ON_GPIO_Port->BSRR = ((uint32_t)Cascadia_ON_Pin << 16u);
+    Buzzer_GPIO_Port->BSRR = ((uint32_t)Buzzer_Pin << 16u);
+}
+
+void ecu_watchdog_init(void)
+{
+#if ECU_ENABLE_IWDG
+    IWDG->KR = 0x5555u; /* Enable PR/RLR writes. */
+    IWDG->PR = ECU_IWDG_PRESCALER_REGISTER;
+    IWDG->RLR = ECU_IWDG_RELOAD_REGISTER;
+    IWDG->KR = 0xAAAAu; /* Load the counter. */
+    IWDG->KR = 0xCCCCu; /* Start; cannot be stopped until reset. */
+#endif
+}
+
+void ecu_watchdog_refresh(void)
+{
+#if ECU_ENABLE_IWDG
+    IWDG->KR = 0xAAAAu;
+#endif
+}
+
 void app_create()
 {
+	app.reset_cause = RCC->CSR;
+	__HAL_RCC_CLEAR_RESET_FLAGS();
 	app.throttle = 0;
 	app.brake = 0;
 
@@ -37,29 +66,34 @@ void app_create()
 	app.soft_fault = false;
 
 	app.coolant_fault = false;
-	app.apps_fault = false;
-	app.bse_fault = false;
+	/* Safety-related inputs start failed and are cleared only by their tasks. */
+	app.apps_fault = true;
+	app.bse_fault = true;
 	app.bppc_fault = false;
 	app.acc_fault = false;
 	app.cli_fault = false;
 	app.canbus_fault = false;
-	app.canbus_rx_fault = false;
+	app.canbus_rx_fault = true;
 	app.canbus_tx_fault = false;
-	app.ams_fault = false;
+	app.canbus_hw_fault = false;
+	app.ams_fault = true;
 	app.dashboard_fault = false;
 	app.mq_fault = false;
 
 	app.fw_state = false;
-	app.fw_override = false;
-	app.fw_override_state = false;
 	app.tsal = false;
 	app.rtd_button = false;
 	app.cascadia_ok = false;
 	app.cascadia_error = false;
 	app.cascadia_en = false;
-	app.imd_fail = false;
-	app.bms_fail = false;
-	app.bspd_fail = false;
+	app.imd_fail = true;
+	app.bms_fail = true;
+	app.bspd_fail = true;
+	app.bspd_ok_raw = false;
+	app.startup_fault = true;
+	app.task_heartbeat_fault = false;
+	app.rtd_trip_pulse_requested = false;
+	app.cm200_rolling_counter = 0u;
 
 	app.brakelight = false;
 
@@ -67,16 +101,25 @@ void app_create()
 	app.coolant_flow = 0.0;
 	app.coolant_temp_in = 0.0;
 	app.coolant_temp_out = 0.0;
+	app.coolant_telemetry_valid = false;
 
 	app.throttle = 0;
 	app.brake = 0;
 
 	board_init(&app.board);
+	ecu_force_safe_outputs();
 	set_cascadia_enable(0);
 	set_cascadia_on(0);
 
-	HAL_UART_Receive_IT(app.board.cli.huart, &app.board.cli.c, 1);
-	HAL_CAN_ActivateNotification(app.board.canbus.hcan, CAN_IT_RX_FIFO0_MSG_PENDING);
+	app.cli_fault = (HAL_UART_Receive_IT(app.board.cli.huart, &app.board.cli.c, 1) != HAL_OK);
+	app.canbus_hw_fault = (HAL_CAN_ActivateNotification(app.board.canbus.hcan,
+	                             CAN_IT_RX_FIFO0_MSG_PENDING |
+	                             CAN_IT_RX_FIFO0_OVERRUN |
+	                             CAN_IT_ERROR_WARNING |
+	                             CAN_IT_ERROR_PASSIVE |
+	                             CAN_IT_BUSOFF |
+	                             CAN_IT_LAST_ERROR_CODE |
+	                             CAN_IT_ERROR) != HAL_OK);
 
 //	HAL_Delay(2);
 
@@ -91,16 +134,18 @@ void app_create()
 	app.dashboard_task = dashboard_task_start(&app);
 	app.cool_task = cool_task_start(&app);
 
-	assert(app.cli_task != NULL);
-	assert(app.rtd_task != NULL);
-	assert(app.error_task != NULL);
-	assert(app.canbus_task != NULL);
-	assert(app.bse_task != NULL);
-	assert(app.apps_task != NULL);
-	assert(app.bppc_task != NULL);
-	assert(app.acc_task != NULL);
-	assert(app.dashboard_task != NULL);
-	assert(app.cool_task != NULL);
+	app.startup_fault = ((app.cli_task == NULL) ||
+	                     (app.rtd_task == NULL) ||
+	                     (app.error_task == NULL) ||
+	                     (app.canbus_task == NULL) ||
+	                     (app.bse_task == NULL) ||
+	                     (app.apps_task == NULL) ||
+	                     (app.bppc_task == NULL) ||
+	                     (app.acc_task == NULL) ||
+	                     (app.dashboard_task == NULL) ||
+	                     (app.cool_task == NULL) ||
+	                     !app.board.canbus.started ||
+	                     !app.board.stm32f767.initialized);
 
 }
 
@@ -109,8 +154,8 @@ HAL_StatusTypeDef read_time(){
 	RTC_DateTypeDef rDate;
 	HAL_StatusTypeDef ret = 0;
 
-	ret |= HAL_RTC_GetTime(&app.board.stm32f767.hrtc, &rTime, RTC_FORMAT_BIN);
-	ret |= HAL_RTC_GetDate(&app.board.stm32f767.hrtc, &rDate, RTC_FORMAT_BIN);
+	ret |= HAL_RTC_GetTime(app.board.stm32f767.hrtc, &rTime, RTC_FORMAT_BIN);
+	ret |= HAL_RTC_GetDate(app.board.stm32f767.hrtc, &rDate, RTC_FORMAT_BIN);
 
 	app.datetime.second = rTime.Seconds;
 	app.datetime.minute = rTime.Minutes;
@@ -126,7 +171,7 @@ HAL_StatusTypeDef write_time(){
 	RTC_TimeTypeDef rTime;
 	RTC_DateTypeDef rDate;
 	HAL_StatusTypeDef ret = 0;
-	RTC_HandleTypeDef *rtc = &app.board.stm32f767.hrtc;
+	RTC_HandleTypeDef *rtc = app.board.stm32f767.hrtc;
 
 	rTime.Seconds = HEX2DEC(app.datetime.second);
 	rTime.Minutes = HEX2DEC(app.datetime.minute);
@@ -146,16 +191,6 @@ void set_ecu_ok(bool state)
 {
 	app.fw_state = state;
 	HAL_GPIO_WritePin(Firmware_Ok_GPIO_Port, Firmware_Ok_Pin, state);
-}
-
-void override_ecu_ok(bool state)
-{
-	app.fw_override_state = state;
-}
-
-void apply_ecu_ok_override(bool state)
-{
-	app.fw_override = state;
 }
 
 void set_buzzer(bool state)

@@ -8,6 +8,7 @@
 
 #include "ext_drivers/ams.h"
 #include "ext_drivers/ecu_safety.h"
+#include "ecu_config.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -46,11 +47,23 @@ static void status_frame(uint8_t frame[8], uint8_t seq, uint8_t status_flags, ui
     frame[7] = 0u;
 }
 
+static bool parse_good_summaries(ams_t *ams, uint32_t now_ms)
+{
+    const uint8_t electrical[8] = {0x0Cu, 0x80u, 0u, 0u, 0x0Bu, 0xB8u, 0x10u, 0x04u};
+    const uint8_t thermal[8] = {0x01u, 0x2Cu, 0x00u, 0xC8u, 0x00u, 0xFAu, 50u, 0u};
+    return (ams_parse_can_frame(ams, AMS_ECU_ELECTRICAL_CANBUS_ID, true, 8u, electrical, now_ms) &&
+            ams_parse_can_frame(ams, AMS_ECU_THERMAL_CANBUS_ID, true, 8u, thermal, now_ms));
+}
+
 static bool parse_status(ams_t *ams, uint8_t seq, uint8_t status_flags, uint8_t fault_flags, uint32_t now_ms)
 {
     uint8_t frame[8];
     status_frame(frame, seq, status_flags, fault_flags);
-    return ams_parse_can_frame(ams, AMS_ECU_STATUS_CANBUS_ID, true, 8u, frame, now_ms);
+    if(!ams_parse_can_frame(ams, AMS_ECU_STATUS_CANBUS_ID, true, 8u, frame, now_ms))
+    {
+        return false;
+    }
+    return parse_good_summaries(ams, now_ms);
 }
 
 static void put_u16_be(uint8_t *dst, uint16_t value)
@@ -172,6 +185,7 @@ static void test_ams_protocol_and_sequence_guards(void)
 
     status_frame(frame, 10u, 0x71u, 0x00u);
     EXPECT_TRUE(ams_parse_can_frame(&ams, AMS_ECU_STATUS_CANBUS_ID, true, 8u, frame, 1000u));
+    EXPECT_TRUE(parse_good_summaries(&ams, 1000u));
     EXPECT_TRUE(ams_allows_torque(&ams));
 
     frame[0] = (uint8_t)(AMS_ECU_COMPACT_PROTOCOL_VERSION + 1u);
@@ -200,6 +214,7 @@ static void test_ams_protocol_and_sequence_guards(void)
     EXPECT_FALSE(ams_allows_torque(&ams));
     frame[1] = 16u;
     EXPECT_TRUE(ams_parse_can_frame(&ams, AMS_ECU_STATUS_CANBUS_ID, true, 8u, frame, 1050u));
+    EXPECT_TRUE(parse_good_summaries(&ams, 1050u));
     EXPECT_FALSE(ams.compact_sequence_fault);
     EXPECT_TRUE(ams_allows_torque(&ams));
 
@@ -258,6 +273,7 @@ static void test_ams_sequence_fuzz_stays_fail_closed(void)
 
         status_frame(frame, seq, status, fault);
         EXPECT_TRUE(ams_parse_can_frame(&ams, AMS_ECU_STATUS_CANBUS_ID, true, 8u, frame, i));
+        EXPECT_TRUE(parse_good_summaries(&ams, i));
 
         bool expected_allow = (!ams.stale &&
                                ams.bms_ok &&
@@ -371,7 +387,7 @@ static void test_cm200_disable_before_enable_and_reset_on_fault(void)
 
     memset(data, 0xA5, sizeof(data));
     ecu_cm200_build_disable_packet(data);
-    const uint8_t disabled[ECU_CM200_DATALEN] = {0u};
+    const uint8_t disabled[ECU_CM200_DATALEN] = {0u, 0u, 0u, 0u, 1u, 0u, 0u, 0u};
     EXPECT_MEM_EQ(data, disabled, ECU_CM200_DATALEN);
 
     ecu_cm200_build_torque_packet(data, 0x1234u);
@@ -379,6 +395,49 @@ static void test_cm200_disable_before_enable_and_reset_on_fault(void)
     EXPECT_EQ_U8(data[1], 0x12u);
     EXPECT_EQ_U8(data[4], 1u);
     EXPECT_EQ_U8(data[5], 1u);
+
+    ecu_cm200_apply_rolling_counter(data, 0x0Au);
+    EXPECT_EQ_U8(data[5], 0xA1u);
+    EXPECT_EQ_U8(ecu_cm200_next_rolling_counter(0x0Eu), 0x0Fu);
+    EXPECT_EQ_U8(ecu_cm200_next_rolling_counter(0x0Fu), 0u);
+
+    ecu_cm200_build_disable_packet(data);
+    ecu_cm200_apply_rolling_counter(data, 3u);
+    EXPECT_EQ_U8(data[4], 1u);
+    EXPECT_EQ_U8(data[5], 0x30u);
+
+    ecu_cm200_build_torque_packet(data, -100);
+    EXPECT_EQ_U8(data[0], 0x9Cu);
+    EXPECT_EQ_U8(data[1], 0xFFu);
+}
+
+static void test_bspd_semantics_and_discrete_recovery_filter(void)
+{
+    ecu_discrete_filter_t filter = {0};
+
+    EXPECT_TRUE(ecu_bspd_raw_is_fault(false));
+    EXPECT_FALSE(ecu_bspd_raw_is_fault(true));
+
+    ecu_discrete_filter_init(&filter);
+    EXPECT_TRUE(filter.faulted);
+    for(uint8_t i = 0u; i < (ECU_DISCRETE_CLEAR_SAMPLES - 1u); i++)
+    {
+        EXPECT_TRUE(ecu_discrete_fault_update(&filter, false, ECU_DISCRETE_CLEAR_SAMPLES));
+    }
+    EXPECT_FALSE(ecu_discrete_fault_update(&filter, false, ECU_DISCRETE_CLEAR_SAMPLES));
+
+    /* Assertion is immediate; clearing is delayed again. */
+    EXPECT_TRUE(ecu_discrete_fault_update(&filter, true, ECU_DISCRETE_CLEAR_SAMPLES));
+    EXPECT_TRUE(ecu_discrete_fault_update(&filter, false, ECU_DISCRETE_CLEAR_SAMPLES));
+    EXPECT_TRUE(ecu_discrete_fault_update(NULL, false, ECU_DISCRETE_CLEAR_SAMPLES));
+}
+
+static void test_heartbeat_timeout_and_wraparound(void)
+{
+    EXPECT_FALSE(ecu_heartbeat_expired(100u, 350u, 250u));
+    EXPECT_TRUE(ecu_heartbeat_expired(100u, 351u, 250u));
+    EXPECT_FALSE(ecu_heartbeat_expired(0xFFFFFF00u, 0xFFFFFFFAu, 250u));
+    EXPECT_TRUE(ecu_heartbeat_expired(0xFFFFFF00u, 0x00000010u, 250u));
 }
 
 static void test_torque_gate_fault_matrix(void)
@@ -435,6 +494,8 @@ int main(void)
     run_test("RTD state machine fault injection", test_rtd_state_machine_fault_injection);
     run_test("RTD wraparound buzz timer", test_rtd_wraparound_buzz_timer);
     run_test("CM200 disable before enable and reset on fault", test_cm200_disable_before_enable_and_reset_on_fault);
+    run_test("BSPD semantics and discrete recovery filter", test_bspd_semantics_and_discrete_recovery_filter);
+    run_test("heartbeat timeout and wraparound", test_heartbeat_timeout_and_wraparound);
     run_test("torque gate fault matrix", test_torque_gate_fault_matrix);
 
     if(failures != 0)

@@ -53,10 +53,6 @@
 #define COOL_TEMP1_CH 15
 #define COOL_TEMP2_CH 14
 
-#define CANBUS_ISR 	0x2	// Notification bit value for ISR messages
-#define CANBUS_APPS	0x1 // Notification bit value for APPS messages 
-
-#define ECU_CANBUS_ID 0x69
 #define CM_CANBUS_ID 0x0C0
 
 typedef struct {

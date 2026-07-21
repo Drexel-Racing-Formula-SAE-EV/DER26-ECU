@@ -21,6 +21,7 @@ void canbus_device_init(canbus_t *dev, CAN_HandleTypeDef *hcan, CAN_TxHeaderType
     dev->hcan = hcan;
     dev->tx_header = tx_header;
     dev->tx_dropped_count = 0u;
+    dev->started = false;
     dev->tx_queue = xQueueCreate(CANBUS_TX_QUEUE_LENGTH, sizeof(canbus_packet_t));
 
     dev->tx_header->IDE = CAN_ID_STD;
@@ -30,7 +31,7 @@ void canbus_device_init(canbus_t *dev, CAN_HandleTypeDef *hcan, CAN_TxHeaderType
     dev->tx_header->DLC = 8;
     dev->tx_header->TransmitGlobalTime = DISABLE;
 
-    (void)HAL_CAN_Start(hcan);
+    dev->started = ((dev->tx_queue != NULL) && (HAL_CAN_Start(hcan) == HAL_OK));
 }
 
 HAL_StatusTypeDef canbus_queue_tx(canbus_t *dev, const canbus_packet_t *packet)

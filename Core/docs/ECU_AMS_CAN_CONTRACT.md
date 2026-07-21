@@ -19,7 +19,7 @@ All frames are standard 11-bit CAN, DLC 8.
 | 6 | Temperature fault reason. |
 | 7 | Current fault reason. |
 
-ECU torque must be blocked when `0x680` is stale, repeated with the same sequence, `BMS_OK` is false, any validity bit is false, or any relevant fault bit is set.
+ECU torque must be blocked when `0x680` is stale, repeated with the same sequence, `BMS_OK` is false, any validity bit is false, or any relevant fault bit is set. A status frame does not make the whole AMS snapshot fresh: the ECU tracks `0x680`, `0x681`, and `0x682` timestamps independently.
 
 Do **not** treat byte 4 bit 3 as firmware-validated IMD health yet. For this staged bench firmware, IMD remains handled outside this compact AMS parser.
 
@@ -41,6 +41,19 @@ Do **not** treat byte 4 bit 3 as firmware-validated IMD health yet. For this sta
 | 4-5 | Average/filtered temperature, signed, 0.1 C/count. |
 | 6 | Maximum fan command percent. |
 | 7 | Thermal/fan flags. |
+
+Byte 7 is decoded as follows:
+
+| Bit | Meaning | Motoring torque action |
+|---:|---|---|
+| 0 | temperature warning | diagnostic/derate candidate |
+| 1 | fan maximum command | diagnostic |
+| 2 | charge stop | does not alone block motoring |
+| 3 | overtemperature pending | diagnostic/derate candidate |
+| 4 | overtemperature fault | block |
+| 5 | severe overtemperature fault | block |
+| 6 | fan fault | diagnostic; AMS status fault policy remains authoritative |
+| 7 | temperature invalid/read fault | block |
 
 ### `0x683` — Location and count summary
 
@@ -66,6 +79,7 @@ Do **not** treat byte 4 bit 3 as firmware-validated IMD health yet. For this sta
 The ECU sets `ams_fault` from `ams_allows_torque()`. With compact status available, torque is allowed only when:
 
 - AMS status is fresh.
+- Electrical and thermal summaries have both been received and are independently fresh (500 ms maximum age).
 - `BMS_OK` is true.
 - AMS inhibit is false.
 - Voltage/current/temp validity bits are true.
@@ -74,5 +88,7 @@ The ECU sets `ams_fault` from `ams_allows_torque()`. With compact status availab
 - Charger, ADBMS diagnostic, task heartbeat, logger heartbeat, and AMS CAN fault bits are false.
 - The compact protocol version matches the ECU-supported version.
 - The status sequence is coherent. Repeated/stuck frames and sequence jumps block torque until a coherent next status frame is received.
+- Electrical `min_cell <= max_cell`, thermal `min_temp <= max_temp`, and fan command is 0-100%.
+- Thermal bits 4, 5, and 7 are clear.
 
 Legacy `0x069` frames are still decoded for bench visibility and old logs, but they are no longer sufficient to allow torque. ECU torque gating requires the compact `0x680` status frame.

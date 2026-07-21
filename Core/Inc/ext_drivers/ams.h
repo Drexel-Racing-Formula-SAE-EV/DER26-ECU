@@ -31,6 +31,14 @@
 #define AMS_FRAME_DLC 8u
 #define AMS_STALE_TIMEOUT_MS 500u
 
+#define AMS_THERMAL_OVERTEMP_FAULT_BIT       4u
+#define AMS_THERMAL_SEVERE_OVERTEMP_BIT      5u
+#define AMS_THERMAL_INVALID_OR_READ_FAULT_BIT 7u
+#define AMS_THERMAL_TORQUE_BLOCK_MASK \
+    ((uint8_t)((1u << AMS_THERMAL_OVERTEMP_FAULT_BIT) | \
+               (1u << AMS_THERMAL_SEVERE_OVERTEMP_BIT) | \
+               (1u << AMS_THERMAL_INVALID_OR_READ_FAULT_BIT)))
+
 typedef struct
 {
     uint16_t header;
@@ -99,6 +107,7 @@ typedef struct
     uint32_t compact_status_rx_count;
     uint32_t compact_sequence_error_count;
     uint32_t last_status_rx_tick;
+    bool compact_status_stale;
 
     /* Compact 0x681 electrical frame. */
     uint16_t pack_voltage_0p1v;
@@ -106,6 +115,9 @@ typedef struct
     uint16_t min_cell_mv;
     uint16_t max_cell_mv;
     bool compact_electrical_valid;
+    bool compact_electrical_sane;
+    bool compact_electrical_stale;
+    uint32_t last_electrical_rx_tick;
 
     /* Compact 0x682 thermal frame. */
     int16_t max_temp_0p1c;
@@ -114,6 +126,9 @@ typedef struct
     uint8_t max_fan_percent;
     uint8_t thermal_flags;
     bool compact_thermal_valid;
+    bool compact_thermal_sane;
+    bool compact_thermal_stale;
+    uint32_t last_thermal_rx_tick;
 
     /* Compact 0x683 health/location frame. */
     uint8_t max_voltage_segment;
@@ -125,6 +140,8 @@ typedef struct
     uint8_t usable_cell_count;
     uint8_t usable_temp_count;
     bool compact_health_valid;
+    bool compact_health_stale;
+    uint32_t last_health_rx_tick;
 
     uint32_t last_rx_tick;
     uint32_t rx_count;

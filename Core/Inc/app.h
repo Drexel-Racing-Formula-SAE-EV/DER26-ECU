@@ -17,11 +17,12 @@
 
 #include "main.h"
 #include "board.h"
+#include "ecu_config.h"
 #include "ext_drivers/rtc.h"
 #include "ext_drivers/ecu_safety.h"
 
 #define VER_MAJOR 2
-#define VER_MINOR 2
+#define VER_MINOR 3
 #define VER_BUG   0
 
 #define PLAUSIBILITY_THRESH 10
@@ -73,13 +74,12 @@ typedef struct {
 	bool canbus_fault;
 	bool canbus_rx_fault;
 	bool canbus_tx_fault;
+	bool canbus_hw_fault;
 	bool ams_fault;
 	bool dashboard_fault;
 	bool mq_fault;
 	
 	bool fw_state;
-	bool fw_override;
-	bool fw_override_state;
 	bool tsal;
 	bool rtd_button;
 	bool cascadia_ok;
@@ -89,6 +89,20 @@ typedef struct {
 	bool imd_fail;
 	bool bms_fail;
 	bool bspd_fail;
+	bool bspd_ok_raw;
+	bool startup_fault;
+	bool task_heartbeat_fault;
+	bool rtd_trip_pulse_requested;
+	uint32_t can_error_code;
+	uint32_t can_rx_overrun_count;
+	uint32_t can_recovery_count;
+	uint32_t reset_cause;
+	uint8_t cm200_rolling_counter;
+	volatile uint32_t apps_heartbeat_tick;
+	volatile uint32_t bse_heartbeat_tick;
+	volatile uint32_t bppc_heartbeat_tick;
+	volatile uint32_t rtd_heartbeat_tick;
+	volatile uint32_t can_heartbeat_tick;
 
 	bool brakelight;
 
@@ -96,6 +110,7 @@ typedef struct {
 	float coolant_flow;
 	float coolant_temp_in;
 	float coolant_temp_out;
+	bool coolant_telemetry_valid;
 
 	board_t board;
 	datetime_t datetime;
@@ -118,12 +133,13 @@ void cli_putline(char *line);
 HAL_StatusTypeDef read_time();
 HAL_StatusTypeDef write_time();
 void set_ecu_ok(bool state);
-void override_ecu_ok(bool state);
-void apply_ecu_ok_override(bool state);
 void set_buzzer(bool state);
 void set_cascadia_enable(bool state);
 void set_cascadia_on(bool state);
 void set_brakelight(bool state);
 void set_ssa(int duty);
+void ecu_force_safe_outputs(void);
+void ecu_watchdog_init(void);
+void ecu_watchdog_refresh(void);
 
 #endif
