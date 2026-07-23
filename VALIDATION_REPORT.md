@@ -1,111 +1,50 @@
-# DER26 ECU Firmware v2.4.0 Validation Report
+# DER26 ECU Firmware v2.5.1 Validation Report
 
-Date: 2026-07-21
+Date: 2026-07-22
 
 ## Scope
 
-This pass reviewed and changed the ECU firmware against the v2.3 safety release, the current AMS compact CAN contract, Cascadia Motion CM software manual `0A-0163-04`, and the supplied ECU/MCU-breakout/BPSD/shutdown/RTM hardware references. The highest-risk additions were CM200 broadcast supervision and command correlation, followed by stale-command prevention, RTD correction, protocol-specific CAN invalidation, AMS plausibility, and staged inverter power/feedback behavior.
+This report covers the second clean compatibility pass between the ECU and DER26 AMS v0.3.4 before implementation of the torque-to-DC-current model. It validates compact AMS health frames, power protocol v2 consumption, legacy diagnostic layout, direction-aware final authority, hardware-commit timing, CAN acceptance filters, and build interlocks. It does not claim a numeric DCL/CCL-to-torque clamp, MPC, target runtime timing, inverter bench validation, or vehicle validation.
 
-## Automated validation
+## Automated validation completed
 
-The final source passed:
+- `host_tests/make ci`: focused unit tests, host regression, portable AMS power-consumer conformance, ECU power integration, AMS-v0.3.4 producer golden vectors, system SIL/fault injection, build-profile gates, and GCC `-fanalyzer`.
+- 45 named unit/regression/SIL tests plus dedicated protocol-v2 conformance, ECU integration, and producer-golden-vector programs.
+- Extended deterministic stress with 50,000 AMS sequence iterations and 50,000 CM200 random-frame iterations.
+- AddressSanitizer plus UndefinedBehaviorSanitizer on the portable consumer, unit, regression, SIL, AMS power-integration, and producer-golden-vector suites.
+- Standalone UndefinedBehaviorSanitizer on the same coverage.
+- Clang static analyzer on portable-consumer, unit, regression, SIL, integration, and producer-golden-vector source sets.
+- GCC full-application analyzer on all 35 bench-profile application files.
+- Warning-as-error full-application syntax/type check for the bench profile.
+- Explicit negative build check proving the vehicle profile remains locked even when every external evidence flag is supplied.
+- Strict warning pass on the host-testable safety/parser core and changed AMS/CAN application path using conversion, sign-conversion, shadow, double-promotion, cast, format, undef, and float-equality warnings.
+- Direct source-to-source compatibility test: the actual AMS v0.3.4 `ams_power_can.c` encoder was compiled separately, linked to the ECU consumer, and decoded successfully.
+- GitHub workflow YAML parse and shell-script syntax checks.
+- Repository structure, hygiene, and `git diff --check` gates.
 
-- 21 focused unit tests.
-- 8 host regression tests.
-- 14 system SIL/fault-injection tests.
-- 43 named tests total.
-- Extended deterministic stress with 50,000 AMS iterations and 50,000 CM200 random-frame iterations.
-- AddressSanitizer plus UndefinedBehaviorSanitizer on all three suites.
-- Standalone UndefinedBehaviorSanitizer on all three suites.
-- GCC `-fanalyzer` on every host-testable parser/safety suite.
-- GCC `-fanalyzer` over the complete 34-file `Core/Src` application tree in both the bench and fully acknowledged vehicle profiles.
-- Warning-as-error syntax/type checks over the complete application tree for:
-  - inhibited bench profile; and
-  - fully acknowledged vehicle profile.
-- Compile gates proving:
-  - bench profile compiles;
-  - vehicle without BPSD acknowledgement is rejected;
-  - vehicle with BPSD but without CM200 acknowledgement is rejected; and
-  - vehicle with both acknowledgements compiles.
-- Project-structure, release-hygiene, ZIP-integrity, and shell-syntax checks.
+## Compatibility and fault coverage
 
-Primary commands:
+- Legacy AMS frame bounds and tails for all 75 cell slots, 120 temperature slots, and 10 fan slots; current map is cells `3-27`, temperatures `28-67`, fans `68-71`.
+- Compile-time packet-layout assertions and rejection of unmapped headers inside the nominal packet range.
+- Compact AMS `0x680-0x683` decoding, protocol/sequence/freshness/fault gates, electrical/thermal plausibility, and immediate malformed-frame invalidation.
+- Electrical cross-consistency requiring the 0.1 V pack summary to lie within the 75-series min/max-cell bounds, allowing 200 mV for quantization/rounding.
+- Power protocol v2 required bundle `0x684-0x687`: ID-bound CRC-8/SAE-J1850, version/counter checks, all frame orders, duplicate/partial/skew rejection, two-good-bundle qualification, 250 ms freshness, semantic limits, and independent discharge versus charge/regen authority.
+- Advisory `0x689`/`0x68A` synchronization and containment: malformed advisory data invalidates only its own metadata and cannot revoke scalar authority.
+- Exactly three wire horizons (`0.1/10/30 s`), with no fabricated one-second array element.
+- Receive-path scalar-cache revocation immediately after malformed/CRC-invalid required power frames.
+- Final CM200 transmit authority check performed after mailbox wait and at bxCAN hardware enqueue while CAN RX is masked.
+- CAN freshness timestamps captured while RX is masked to prevent one-tick false-stale decisions.
+- CM200 broadcast parsing, freshness, rolling counter, torque echo, timer progression, capability, and fault supervision.
+- CAN filter list explicitly fills all 28 bxCAN 16-bit list slots; no implicit ID `0x000` entries remain. The stale permissive `MX_CAN1_Init()` filter was removed so `canbus_device_init()` is the single acceptance-filter owner before CAN start.
+- CAN notification activation has one checked owner after filters are installed and CAN is started; activation failure latches startup fault, and structure CI prevents generated duplicate ownership.
+- The ISR-owned CAN hardware-fault flag is consumed directly by both the APPS pre-gate and final command-commit gate, avoiding a lower-rate aggregation/clear race.
 
-```sh
-make -C host_tests CC=gcc clean
-make -C host_tests CC=gcc ci
-make -C host_tests CC=gcc asan
-make -C host_tests CC=gcc ubsan
-make -C host_tests CC=gcc stress
-bash ci/scripts/check_core_host_syntax.sh
-bash ci/scripts/check_core_gcc_analyzer.sh
-bash ci/scripts/check_project_structure.sh
-bash ci/scripts/check_repo_hygiene.sh
-```
+## Vehicle build status
 
-## Safety behavior covered
+Vehicle output remains deliberately compile-locked. `ECU_AMS_POWER_CLAMP_IMPLEMENTED` is source-owned and set to `0`; defining it externally is rejected. `ECU_AMS_POWER_CLAMP_VALIDATED` is a separate release-evidence acknowledgement. Both will be required after the conservative low-speed/stall-safe torque-to-DC-current model and numeric DCL/CCL clamp are implemented.
 
-AMS:
+## Not completed in this environment
 
-- compact status/electrical/thermal/health decoding and endianness;
-- independent 500 ms freshness;
-- protocol and rolling-sequence guards;
-- all relevant status/fault/thermal-block bits;
-- cell, pack voltage/current, thermal, average, fan, location, and count plausibility;
-- malformed required-frame immediate invalidation;
-- legacy frame bounds/tails for all 75 cell slots and 85 temperature slots.
-
-CM200:
-
-- little-endian decoding of 11 broadcasts;
-- required A5/A7/AA/AB/AC/B1 freshness;
-- feedback-health versus VSM torque-ready split;
-- CAN torque mode, lockout, direction, VSM state, POST/RUN fault gates;
-- expected-counter acquisition, progression, one-command lag, wrap, mismatch debounce, and post-sync fault;
-- current/previous command echo and mismatch fault;
-- power-on timer progression, repeats, wrap, backwards/reset detection;
-- startup grace, runtime loss, immediate fault, and reset-required latches;
-- capability clamp, signed packet encoding, direction-preserving disable, unlock sequence, rolling counter, and slew limit;
-- random broadcasts cannot create authority without correlated ECU commands.
-
-System behavior:
-
-- RTD initial release, deliberate press, early/stuck press rejection, momentary-button release, 2 s sound, fault exit, new-action rearm, and tick wrap;
-- complete torque-gate fault matrix including CM200;
-- BPSD fail-low semantics and 250 ms healthy recovery;
-- task-heartbeat timeout/wrap behavior;
-- bench/vehicle compile locks.
-
-The full-source checks also cover the HAL/FreeRTOS integration of the one-slot transmit mailbox, final pre-transmit revalidation, bounded CAN FIFO drain, hardware filter configuration, CLI priority/stack diagnostics, cooling heartbeat, and stopped-flow freshness. Those integration paths still require target and hardware tests because they are not executed by the pure host harness.
-
-## Not available in this environment
-
-`arm-none-eabi-gcc`, STM32CubeIDE, Clang, and physical hardware were unavailable. Therefore this release does not include or claim validation of:
-
-- STM32F767 target ELF, map, HEX, or binary;
-- target ABI/linker/startup correctness beyond source checks;
-- measured CPU load, interrupt latency, task jitter, stack margin, or watchdog time;
-- bxCAN filter register behavior, bus electrical timing, termination, error recovery, or actual message rates;
-- CM200 EEPROM settings, counter/echo semantics, VSM/precharge sequence, torque capability, or physical disable;
-- output polarity/glitches, BPSD conditioning, BMS/IMD/TSAL/motor discrete levels;
-- APPS/BSE/cooling calibration, brake performance, or vehicle dynamics.
-
-No vehicle-release image should be produced from this source until a clean target build/map review and every applicable stage in `Core/docs/ECU_HARDWARE_BRINGUP.md` is complete.
-
-## Required vehicle selection
-
-The default remains:
-
-```text
-ECU_BUILD_PROFILE=0
-```
-
-Only after signed hardware evidence exists may a vehicle build define:
-
-```text
-ECU_BUILD_PROFILE=1
-ECU_BSPD_INTERFACE_3V3_VALIDATED=1
-ECU_CM200_CAN_CONTRACT_VALIDATED=1
-```
-
-The two acknowledgement symbols are interlocks only. They do not perform or certify the required tests.
+- ARM target ELF/link/map generation: `arm-none-eabi-gcc` is unavailable.
+- Hardware CAN, CM200DX, motor, accumulator, WCET, stack-watermark, dyno, or vehicle tests.
+- Numeric battery-current-to-torque enforcement and MPC.

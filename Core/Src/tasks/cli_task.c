@@ -65,16 +65,16 @@ command_t cmds[] =
 	{"sd", &sd, "print the shutdown circuit states"}
 };
 
-TaskHandle_t cli_task_start(app_data_t *data)
+TaskHandle_t cli_task_start(app_data_t *app_data)
 {
    TaskHandle_t handle = NULL;
 
-   if(data == NULL)
+   if(app_data == NULL)
    {
        return NULL;
    }
 
-   xTaskCreate(cli_task_fn, "CLI task", 1024, (void *)data, CLI_PRIO, &handle);
+   xTaskCreate(cli_task_fn, "CLI task", 1024, (void *)app_data, CLI_PRIO, &handle);
    return handle;
 }
 
@@ -178,6 +178,10 @@ int id(int argc, char *argv[])
 	         (unsigned)ECU_BSPD_INTERFACE_3V3_VALIDATED,
 	         (unsigned)ECU_CM200_CAN_CONTRACT_VALIDATED);
 	cli_printline(cli, outline);
+    snprintf(outline, CLI_LINESZ, "ams_clamp_impl:%u ams_clamp_valid:%u",
+             (unsigned)ECU_AMS_POWER_CLAMP_IMPLEMENTED,
+             (unsigned)ECU_AMS_POWER_CLAMP_VALIDATED);
+    cli_printline(cli, outline);
 	snprintf(outline, CLI_LINESZ, "reset_cause:0x%08lX watchdog:%u",
 	         (unsigned long)data->reset_cause, (unsigned)ECU_ENABLE_IWDG);
 	cli_printline(cli, outline);
@@ -444,6 +448,35 @@ int get_time(int argc, char *argv[])
 	return 0;
 }
 
+static bool cli_datetime_fields_valid(int month, int day, int year,
+                                      int hour, int minute, int second)
+{
+    static const uint8_t days_per_month[12] =
+    {
+        31u, 28u, 31u, 30u, 31u, 30u,
+        31u, 31u, 30u, 31u, 30u, 31u
+    };
+    int max_day;
+
+    if((year < 0) || (year > 99) ||
+       (month < 1) || (month > 12) ||
+       (hour < 0) || (hour > 23) ||
+       (minute < 0) || (minute > 59) ||
+       (second < 0) || (second > 59))
+    {
+        return false;
+    }
+
+    max_day = (int)days_per_month[month - 1];
+    /* STM32 RTC year 00-99 is used as 2000-2099 by this firmware. */
+    if((month == 2) && ((year % 4) == 0))
+    {
+        max_day = 29;
+    }
+
+    return (day >= 1) && (day <= max_day);
+}
+
 int set_time(int argc, char *argv[])
 {
 	int month, day, year, hour, minute, second;
@@ -468,13 +501,23 @@ int set_time(int argc, char *argv[])
 		return 1;
 	}
 
-	data->datetime.month = month;
-	data->datetime.day = day;
-	data->datetime.year = year;
-	data->datetime.hour = hour;
-	data->datetime.minute = minute;
-	data->datetime.second = second;
-	write_time();
+    if(!cli_datetime_fields_valid(month, day, year, hour, minute, second))
+    {
+        cli_printline(cli, "ERROR: RTC fields are outside valid ranges");
+        return 1;
+    }
+
+	data->datetime.month = (uint16_t)month;
+	data->datetime.day = (uint16_t)day;
+	data->datetime.year = (uint16_t)year;
+	data->datetime.hour = (uint16_t)hour;
+	data->datetime.minute = (uint16_t)minute;
+	data->datetime.second = (uint16_t)second;
+	if(write_time() != HAL_OK)
+    {
+        cli_printline(cli, "ERROR: RTC write failed");
+        return 1;
+    }
 
 	snprintf(outline, CLI_LINESZ, "Set RTC: %02d/%02d/%d-%02d:%02d:%02d",
 			data->datetime.month,

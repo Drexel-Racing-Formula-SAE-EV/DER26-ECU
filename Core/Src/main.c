@@ -409,7 +409,8 @@ void MX_CAN1_Init(void)
 {
 
   /* USER CODE BEGIN CAN1_Init 0 */
-  CAN_FilterTypeDef canfil;
+  /* Acceptance filters are owned by canbus_device_init() and are installed
+   * before HAL_CAN_Start().  Do not add a permissive catch-all filter here. */
   /* USER CODE END CAN1_Init 0 */
 
   /* USER CODE BEGIN CAN1_Init 1 */
@@ -432,27 +433,9 @@ void MX_CAN1_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN CAN1_Init 2 */
-  canfil.FilterBank = 0;
-  canfil.FilterMode = CAN_FILTERMODE_IDMASK;
-  canfil.FilterFIFOAssignment = CAN_RX_FIFO0;
-  canfil.FilterIdHigh = 0;
-  canfil.FilterIdLow = 0;
-  canfil.FilterMaskIdHigh = 0;
-  canfil.FilterMaskIdLow = 0;
-  canfil.FilterScale = CAN_FILTERSCALE_32BIT;
-  canfil.FilterActivation = ENABLE;
-  canfil.SlaveStartFilterBank = 14;
-
-  HAL_CAN_ConfigFilter(&hcan1, &canfil); // Initialize CAN Filter
-
-  HAL_CAN_ActivateNotification(&hcan1,
-                               CAN_IT_RX_FIFO0_MSG_PENDING |
-                               CAN_IT_RX_FIFO0_OVERRUN |
-                               CAN_IT_ERROR_WARNING |
-                               CAN_IT_ERROR_PASSIVE |
-                               CAN_IT_BUSOFF |
-                               CAN_IT_LAST_ERROR_CODE |
-                               CAN_IT_ERROR);
+  /* CAN notifications are activated once, after canbus_device_init() has
+   * installed acceptance filters and started the peripheral.  app_create()
+   * owns that checked activation step. */
   /* USER CODE END CAN1_Init 2 */
 
 }

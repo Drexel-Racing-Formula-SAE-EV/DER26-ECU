@@ -28,8 +28,8 @@ jobs:
       - name: Manual checkout without external actions
         run: |
           git init .
-          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          git fetch --depth=1 origin "${GITHUB_REF}"
+          git remote add origin "https://x-access-token:${{ github.token }}@github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags --depth=1 origin "${GITHUB_SHA}"
           git checkout --force FETCH_HEAD
       - name: Check project structure
         run: bash ci/scripts/check_project_structure.sh
@@ -44,13 +44,13 @@ jobs:
       - name: Manual checkout without external actions
         run: |
           git init .
-          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          git fetch --depth=1 origin "${GITHUB_REF}"
+          git remote add origin "https://x-access-token:${{ github.token }}@github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags --depth=1 origin "${GITHUB_SHA}"
           git checkout --force FETCH_HEAD
       - name: Install host tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential gcc make
+          sudo apt-get install -y build-essential gcc clang make
       - name: Run ECU unit tests
         working-directory: host_tests
         run: |
@@ -59,20 +59,36 @@ jobs:
       - name: Run ECU host regression tests
         working-directory: host_tests
         run: make CC=gcc test | tee host_test_output.txt
+      - name: Run AMS power-protocol conformance, producer golden vectors, and ECU integration tests
+        working-directory: host_tests
+        run: |
+          make CC=gcc power-consumer | tee power_consumer_output.txt
+          make CC=gcc power-integration | tee power_integration_output.txt
+          make CC=gcc power-golden | tee power_golden_output.txt
       - name: Run ECU system SIL tests
         working-directory: host_tests
         run: make CC=gcc system-sil | tee system_sil_output.txt
+      - name: Run extended deterministic fault-injection stress
+        working-directory: host_tests
+        run: make CC=gcc stress
       - name: Verify build-profile safety gates
         working-directory: host_tests
         run: make CC=gcc profile-gates
-      - name: Type-check full ECU application in both profiles
+      - name: Type-check bench application and verify vehicle implementation lock
         run: bash ci/scripts/check_core_host_syntax.sh
       - name: Run ECU sanitizer tests
         working-directory: host_tests
-        run: make CC=gcc asan
-      - name: Run GCC analyzer
+        run: |
+          make CC=gcc asan
+          make CC=gcc ubsan
+      - name: Run host-suite GCC analyzer
         working-directory: host_tests
         run: make CC=gcc analyze
+      - name: Run host-suite Clang analyzer
+        working-directory: host_tests
+        run: make CC=gcc CLANG=clang clang-analyze
+      - name: Run full bench-application GCC analyzer
+        run: bash ci/scripts/check_core_gcc_analyzer.sh
       - name: Print host test output
         if: always()
         working-directory: host_tests
@@ -81,6 +97,12 @@ jobs:
           test -f unit_test_output.txt && cat unit_test_output.txt || true
           echo "===== host_test_output.txt ====="
           test -f host_test_output.txt && cat host_test_output.txt || true
+          echo "===== power_consumer_output.txt ====="
+          test -f power_consumer_output.txt && cat power_consumer_output.txt || true
+          echo "===== power_integration_output.txt ====="
+          test -f power_integration_output.txt && cat power_integration_output.txt || true
+          echo "===== power_golden_output.txt ====="
+          test -f power_golden_output.txt && cat power_golden_output.txt || true
           echo "===== system_sil_output.txt ====="
           test -f system_sil_output.txt && cat system_sil_output.txt || true
 
@@ -92,8 +114,8 @@ jobs:
       - name: Manual checkout without external actions
         run: |
           git init .
-          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          git fetch --depth=1 origin "${GITHUB_REF}"
+          git remote add origin "https://x-access-token:${{ github.token }}@github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags --depth=1 origin "${GITHUB_SHA}"
           git checkout --force FETCH_HEAD
       - name: Install ARM GCC toolchain
         run: |

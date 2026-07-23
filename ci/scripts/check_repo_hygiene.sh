@@ -21,7 +21,7 @@ done
 bad_files=$(find . -path "./.git" -prune -o \( \
   -name "*.elf" -o -name "*.bin" -o -name "*.hex" -o -name "*.map" -o -name "*.list" -o \
   -name "*.lst" -o -name "*.o" -o -name "*.d" -o -name "*.su" -o -name "*.log" -o \
-  -name "*.tmp" -o -name "*.bak" -o -name "*.orig" -o -name "*.rej" \) -print)
+  -name "*.tmp" -o -name "*.plist" -o -name "*.bak" -o -name "*.orig" -o -name "*.rej" \) -print)
 
 if [[ -n "$bad_files" ]]; then
   echo "Forbidden generated files found:"

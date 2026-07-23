@@ -40,8 +40,22 @@ SOURCES=()
 while IFS= read -r src; do SOURCES+=("$src"); done < <(find "$ROOT_DIR/Core/Src" -name "*.c" -print | sort)
 
 gcc "${COMMON[@]}" -DECU_BUILD_PROFILE=0 "${INCLUDES[@]}" "${SOURCES[@]}"
-gcc "${COMMON[@]}" -DECU_BUILD_PROFILE=1 -DECU_BSPD_INTERFACE_3V3_VALIDATED=1 \
-  -DECU_CM200_CAN_CONTRACT_VALIDATED=1 \
-  "${INCLUDES[@]}" "${SOURCES[@]}"
 
-echo "Full ECU application syntax check passed for bench and vehicle profiles."
+# Even with every external evidence acknowledgement present, the current
+# vehicle build must remain locked until ecu_config.h's source-owned
+# ECU_AMS_POWER_CLAMP_IMPLEMENTED latch is changed by the implementation commit.
+vehicle_error="$(mktemp)"
+trap 'rm -f "$vehicle_error"' EXIT
+if gcc "${COMMON[@]}" -DECU_BUILD_PROFILE=1 -DECU_BSPD_INTERFACE_3V3_VALIDATED=1 \
+  -DECU_CM200_CAN_CONTRACT_VALIDATED=1 -DECU_AMS_POWER_CLAMP_VALIDATED=1 \
+  "${INCLUDES[@]}" "${SOURCES[@]}" >/dev/null 2>"$vehicle_error"; then
+  echo "ERROR: vehicle profile bypassed the source-owned AMS power-clamp implementation lock"
+  exit 1
+fi
+if ! grep -q "Vehicle profile requires the conservative AMS DCL/CCL torque clamp implementation" "$vehicle_error"; then
+  echo "ERROR: vehicle profile failed for an unexpected reason"
+  cat "$vehicle_error"
+  exit 1
+fi
+
+echo "Full ECU application syntax check passed for bench profile; expected vehicle implementation lock verified."

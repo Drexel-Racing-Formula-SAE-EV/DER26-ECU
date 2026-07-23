@@ -32,4 +32,10 @@ make CC=gcc ubsan
 make CC=gcc stress
 ```
 
-`make ci` runs unit, regression, system SIL, profile gates, and GCC analysis. The repository CI additionally type-checks every application source in the inhibited bench profile and the fully acknowledged vehicle profile, then performs the ARM-GCC target build when that toolchain is available.
+`make ci` runs unit, regression, protocol-v2 conformance/integration, system SIL, profile gates, and GCC analysis. The repository CI type-checks every application source in the inhibited bench profile and verifies that the vehicle profile remains blocked by the source-owned missing-clamp implementation latch. The ARM-GCC job currently builds the bench profile; a vehicle build is intentionally impossible until the numeric AMS clamp is implemented.
+
+## AMS power protocol v2
+
+`make power-consumer` runs the portable atomic-bundle conformance suite copied from the current AMS reference consumer. `make power-integration` runs the ECU wrapper and torque-gate integration suite with production power-authority gating enabled. Existing compact-frame legacy suites compile with the dynamic power gate disabled only to preserve their narrow historical test scope; production and profile-gate compilations default to requiring power protocol v2.
+
+- `make power-golden` validates AMS v0.3.4 producer-generated CAN golden vectors against the ECU decoder.

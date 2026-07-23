@@ -57,7 +57,7 @@ The ECU sends `0x0C0` every 10 ms:
 - byte 5 bits 4-7: 4-bit rolling counter;
 - bytes 6-7: zero.
 
-Five disable packets are sent before enable. The transmit path revalidates every queued enable packet immediately before HAL submission. The software queue is a one-slot latest-value mailbox, so a new disable replaces an older unsent torque request.
+Five disable packets are sent before enable. The transmit path waits for a free bxCAN mailbox, then revalidates every queued enable packet and submits it to hardware while CAN RX is masked. The software queue is a one-slot latest-value mailbox, so a new disable replaces an older unsent torque request; a newer AMS/CM200 inhibit accepted before hardware commit also converts the local candidate to disable.
 
 The counter advances only after HAL accepts the frame. `0x0AA` must track either the next expected count or the one-command-lag count, and the value must visibly progress before synchronization is declared. Initial mismatch is allowed for one acquisition sweep because a controller can retain a previous sender's expected count. After synchronization, three consecutive mismatches are a fault.
 

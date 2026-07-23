@@ -112,7 +112,10 @@ void apps_task_fn(void *arg)
             .bppc_fault = data->bppc_fault,
             .bse_fault = data->bse_fault,
             .ams_fault = data->ams_fault,
-            .canbus_fault = data->canbus_fault,
+            /* Include the ISR-owned hardware fault directly.  The lower-rate
+             * aggregate canbus_fault may not have observed it yet, and the CAN
+             * task can clear a recovered transient after a successful send. */
+            .canbus_fault = (data->canbus_fault || data->canbus_hw_fault),
             .canbus_rx_fault = data->canbus_rx_fault,
             .canbus_tx_fault = data->canbus_tx_fault,
             .imd_fail = data->imd_fail,

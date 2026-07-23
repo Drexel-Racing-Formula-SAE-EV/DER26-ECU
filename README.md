@@ -1,6 +1,6 @@
-# DER26 ECU Firmware v2.4.0
+# DER26 ECU Firmware v2.5.1
 
-STM32F767ZI / FreeRTOS firmware for the DER26 vehicle ECU. Version 2.4 adds supervised CM200 feedback, closes stale-command and RTD state-machine defects, strengthens AMS/CAN validation, and expands bring-up diagnostics while preserving the output-inhibited default.
+STM32F767ZI / FreeRTOS firmware for the DER26 vehicle ECU. Version 2.5.1 aligns the ECU with AMS v0.3.4 power protocol v2, corrects the 120-temperature legacy mapping, makes the final AMS authority check direction-aware, and preserves the output-inhibited default while the numeric torque-to-DC-current clamp remains unimplemented.
 
 ## Build locks
 
@@ -12,15 +12,16 @@ ECU_BUILD_PROFILE=0
 
 It runs sensing, CAN decoding, command generation, CLI, and safety logic, but holds `Firmware_Ok`, `MTR_EN`, `Cascadia_ON`, and enabled/nonzero torque commands inhibited.
 
-A vehicle build requires all three symbols:
+A future vehicle build requires the profile plus all external evidence acknowledgements:
 
 ```text
 ECU_BUILD_PROFILE=1
 ECU_BSPD_INTERFACE_3V3_VALIDATED=1
 ECU_CM200_CAN_CONTRACT_VALIDATED=1
+ECU_AMS_POWER_CLAMP_VALIDATED=1
 ```
 
-The BPSD board exports a nominal 12 V active-high `BSPD Ok` signal, while PE13 is a 3.3 V input with no shown level conversion. Never connect that output directly to PE13. The second acknowledgement requires measured CM200 IDs, rates, command mode, rolling-counter behavior, and required broadcasts. These symbols are locks, not proof of hardware validation.
+It additionally requires the source-owned `ECU_AMS_POWER_CLAMP_IMPLEMENTED` latch to be changed from `0` to `1` by the implementation commit. That latch cannot be supplied through compiler flags, so the vehicle profile is intentionally unbuildable in v2.5.1. The BPSD board exports a nominal 12 V active-high `BSPD Ok` signal, while PE13 is a 3.3 V input with no shown level conversion. Never connect that output directly to PE13. The CM200 acknowledgement requires measured IDs, rates, command mode, rolling-counter behavior, and required broadcasts. These symbols are locks, not proof of hardware validation.
 
 ## Safety behavior
 
@@ -34,9 +35,9 @@ The BPSD board exports a nominal 12 V active-high `BSPD Ok` signal, while PE13 i
 
 ## AMS supervision
 
-Torque authorization requires independently fresh `0x680`, `0x681`, and `0x682` frames, coherent status sequence, matching protocol version, BMS_OK/validity flags, zero relevant faults, and sane electrical/thermal values. A malformed required frame invalidates its last good value immediately rather than leaving it trusted until the 500 ms age timeout.
+Torque authorization requires independently fresh `0x680`, `0x681`, and `0x682` health frames, coherent status sequence, matching protocol version, BMS_OK/validity flags, zero relevant faults, and sane electrical/thermal values. It also requires a fresh, atomic two-good-bundle protocol-v2 authority from `0x684-0x687`. Positive torque uses discharge authority; negative torque uses charge/regen authority. A malformed required frame invalidates its last good value immediately, while malformed optional `0x689`/`0x68A` metadata cannot revoke scalar authority. Producer-generated AMS v0.3.4 golden vectors are kept in host CI to lock byte order, scales, CRC, horizon selection, and optional metadata decoding.
 
-Electrical summaries enforce cell, pack-current, pack-voltage, and min/max plausibility bounds. Thermal summaries enforce -40 to 150 C bounds, `min <= average <= max`, and fan command no greater than 100%. Legacy `0x069` and `0x421` remain diagnostic-only and cannot authorize torque. See [ECU/AMS CAN contract](Core/docs/ECU_AMS_CAN_CONTRACT.md).
+Electrical summaries enforce cell, pack-current, and pack-voltage plausibility bounds, including a 75-series consistency check requiring the reported pack voltage to lie between `75 * min_cell` and `75 * max_cell` within a 200 mV encoding tolerance. Thermal summaries enforce -40 to 150 C bounds, `min <= average <= max`, and fan command no greater than 100%. Legacy `0x069` now matches the current 75-cell/120-temperature/10-fan packet map and remains diagnostic-only; `0x421` remains raw estimator diagnostics. See [ECU/AMS CAN contract](Core/docs/ECU_AMS_CAN_CONTRACT.md).
 
 ## CM200 supervision
 
@@ -58,13 +59,13 @@ Each required frame has a 250 ms timeout. Torque also requires:
 - VSM Ready or Motor Running state and forward direction;
 - fresh positive motoring capability.
 
-CM200 commands now run at 100 Hz. Positive torque is limited by the `0x0B1` capability and calibrated 200 Nm ceiling, with a positive-torque slew limiter. Every fault or inhibit bypasses the down-slew and sends immediate zero/disable. The one-slot transmit mailbox replaces an unsent old request, eliminating FIFO delivery of stale positive torque after a newer disable.
+CM200 commands now run at 100 Hz. Positive torque is limited by the `0x0B1` capability and calibrated 200 Nm ceiling, with a positive-torque slew limiter. Every fault or inhibit bypasses the down-slew and sends immediate zero/disable. The one-slot transmit mailbox replaces an unsent old request, eliminating FIFO delivery of stale positive torque after a newer disable. After any hardware-mailbox wait, the CAN task samples the newest AMS/CM200 state and commits the selected command to bxCAN while CAN RX is masked; a newer authority zero accepted before that commit point cannot be bypassed.
 
 The controller is powered in stages so feedback can start without creating a shutdown/precharge deadlock. Communication health permits `Firmware_OK`; VSM Ready/Running remains mandatory for RTD and torque. Missing startup feedback and runtime feedback/integrity failures are reset-required latches. Details and the EEPROM/test contract are in [CM200 CAN contract and bring-up](Core/docs/CM200_CAN_CONTRACT_AND_BRINGUP.md).
 
 ## CAN hardening
 
-- bxCAN hardware list filters admit only the supported AMS and CM200 standard data IDs.
+- bxCAN hardware list filters admit only the supported AMS and CM200 standard data IDs; `canbus_device_init()` is the single filter owner before CAN start.
 - Remote frames are rejected again in software.
 - The RX ISR drains a bounded batch instead of one frame per callback.
 - Valid, ignored, malformed, remote, FIFO-overrun, recovery, replaced-command, and dropped-command counts are retained.
@@ -103,6 +104,7 @@ make CC=gcc ci
 make CC=gcc asan
 make CC=gcc ubsan
 make CC=gcc stress
+make CC=gcc CLANG=clang clang-analyze
 ```
 
 Bench ARM build:
@@ -111,12 +113,13 @@ Bench ARM build:
 ECU_BUILD_PROFILE=0 bash ci/stm32/build_ecu_headless_gcc.sh
 ```
 
-Vehicle ARM build, only after both hardware contracts are closed:
+Vehicle ARM build, only after the BSPD/CM200 contracts and the implemented numeric AMS clamp are closed:
 
 ```bash
 ECU_BUILD_PROFILE=1 \
 ECU_BSPD_INTERFACE_3V3_VALIDATED=1 \
 ECU_CM200_CAN_CONTRACT_VALIDATED=1 \
+ECU_AMS_POWER_CLAMP_VALIDATED=1 \
 bash ci/stm32/build_ecu_headless_gcc.sh
 ```
 

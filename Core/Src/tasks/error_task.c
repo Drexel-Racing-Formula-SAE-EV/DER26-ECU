@@ -72,11 +72,17 @@ void error_task_fn(void *arg)
         bool cm200_immediate_fault;
         ecu_fault_inputs_t power_faults;
         ecu_fault_inputs_t shutdown_faults;
+        uint32_t comms_now_ms;
 
         taskENTER_CRITICAL();
-        ams_update_stale(&data->board.ams, entry);
+        /* Use a timestamp captured while CAN RX is masked.  A timestamp
+         * sampled before this critical section can be older than a frame
+         * accepted by the ISR immediately before masking, causing one-cycle
+         * false stale detection through unsigned age arithmetic. */
+        comms_now_ms = HAL_GetTick();
+        ams_update_stale(&data->board.ams, comms_now_ms);
         data->ams_fault = !ams_allows_torque(&data->board.ams);
-        cm200_update_stale(&data->board.cm200, entry);
+        cm200_update_stale(&data->board.cm200, comms_now_ms);
         cm200_feedback_ready = cm200_feedback_healthy(&data->board.cm200);
         cm200_torque_ready = cm200_allows_torque(&data->board.cm200);
         cm200_immediate_fault = cm200_has_immediate_fault(&data->board.cm200);

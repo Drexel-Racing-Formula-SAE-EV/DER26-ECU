@@ -124,14 +124,22 @@ void app_create()
 	app.cli_fault = (HAL_UART_Receive_IT(app.board.cli.huart,
 	                                    (uint8_t *)&app.board.cli.c,
 	                                    1) != HAL_OK);
-	app.canbus_hw_fault = (HAL_CAN_ActivateNotification(app.board.canbus.hcan,
-	                             CAN_IT_RX_FIFO0_MSG_PENDING |
-	                             CAN_IT_RX_FIFO0_OVERRUN |
-	                             CAN_IT_ERROR_WARNING |
-	                             CAN_IT_ERROR_PASSIVE |
-	                             CAN_IT_BUSOFF |
-	                             CAN_IT_LAST_ERROR_CODE |
-	                             CAN_IT_ERROR) != HAL_OK);
+	if(app.board.canbus.started)
+	{
+		app.canbus_hw_fault =
+			(HAL_CAN_ActivateNotification(app.board.canbus.hcan,
+			     CAN_IT_RX_FIFO0_MSG_PENDING |
+			     CAN_IT_RX_FIFO0_OVERRUN |
+			     CAN_IT_ERROR_WARNING |
+			     CAN_IT_ERROR_PASSIVE |
+			     CAN_IT_BUSOFF |
+			     CAN_IT_LAST_ERROR_CODE |
+			     CAN_IT_ERROR) != HAL_OK);
+	}
+	else
+	{
+		app.canbus_hw_fault = true;
+	}
 
 //	HAL_Delay(2);
 
@@ -157,6 +165,7 @@ void app_create()
 	                     (app.dashboard_task == NULL) ||
 	                     (app.cool_task == NULL) ||
 	                     !app.board.canbus.started ||
+	                     app.canbus_hw_fault ||
 	                     !app.board.stm32f767.initialized);
 
 }

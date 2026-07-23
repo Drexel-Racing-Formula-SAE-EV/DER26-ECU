@@ -46,6 +46,8 @@ typedef struct {
 } canbus_t;
 
 void canbus_device_init(canbus_t *dev, CAN_HandleTypeDef *hcan, CAN_TxHeaderTypeDef *tx_header);
+HAL_StatusTypeDef canbus_wait_tx_ready(canbus_t *dev, uint32_t timeout_ms);
+HAL_StatusTypeDef canbus_transmit_ready(canbus_t *dev, const canbus_packet_t *packet);
 HAL_StatusTypeDef canbus_transmit(canbus_t *dev, const canbus_packet_t *packet, uint32_t timeout_ms);
 HAL_StatusTypeDef canbus_queue_tx(canbus_t *dev, const canbus_packet_t *packet);
 

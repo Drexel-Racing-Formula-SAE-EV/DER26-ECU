@@ -35,7 +35,7 @@ static void test_init_and_75s_layout(void)
 
     EXPECT_EQ_U16(NSEGS, 5u);
     EXPECT_EQ_U16(NVOLTS, 15u);
-    EXPECT_EQ_U16(NTEMPS, 17u);
+    EXPECT_EQ_U16(NTEMPS, 24u);
     EXPECT_TRUE(ams.stale == false);
     EXPECT_EQ_U32(ams.rx_count, 0u);
 }
@@ -76,12 +76,13 @@ static void test_temp_tail_and_fan_tail_parse(void)
     uint8_t frame[8];
     ams_init(&ams);
 
-    make_packet(frame, 57u, 151u, 161u, 999u);
+    make_packet(frame, 67u, 211u, 221u, 231u);
     EXPECT_TRUE(ams_parse_can_frame(&ams, AMS_TELEM_CANBUS_ID, true, 8u, frame, 30u));
-    EXPECT_EQ_U16(ams.segs[4].temps[15], 151u);
-    EXPECT_EQ_U16(ams.segs[4].temps[16], 161u);
+    EXPECT_EQ_U16(ams.segs[4].temps[21], 211u);
+    EXPECT_EQ_U16(ams.segs[4].temps[22], 221u);
+    EXPECT_EQ_U16(ams.segs[4].temps[23], 231u);
 
-    make_packet(frame, 61u, 90u, 999u, 999u);
+    make_packet(frame, 71u, 90u, 999u, 999u);
     EXPECT_TRUE(ams_parse_can_frame(&ams, AMS_TELEM_CANBUS_ID, true, 8u, frame, 40u));
     EXPECT_EQ_U16(ams.fans[9], 90u);
 }
@@ -92,7 +93,7 @@ static void test_invalid_frames_rejected(void)
     uint8_t frame[8];
     ams_init(&ams);
 
-    make_packet(frame, 62u, 1u, 2u, 3u);
+    make_packet(frame, 72u, 1u, 2u, 3u);
     EXPECT_FALSE(ams_parse_can_frame(&ams, AMS_TELEM_CANBUS_ID, true, 8u, frame, 1u));
     EXPECT_EQ_U32(ams.bad_rx_count, 1u);
 
@@ -148,7 +149,7 @@ static void test_compact_status_and_electrical_parse(void)
 {
     ams_t ams;
     uint8_t status[8] = {AMS_ECU_COMPACT_PROTOCOL_VERSION, 1u, 2u, 0x71u, 0u, 0u, 0u, 0u};
-    uint8_t electrical[8] = {0x0Cu, 0x80u, 0x00u, 0x7Bu, 0x0Bu, 0xEAu, 0x10u, 0x68u};
+    uint8_t electrical[8] = {0x0Bu, 0xB8u, 0x00u, 0x7Bu, 0x0Bu, 0xEAu, 0x10u, 0x68u};
     uint8_t thermal[8] = {0x01u, 0x2Cu, 0x00u, 0xC8u, 0x00u, 0xFAu, 50u, 0u};
     ams_init(&ams);
 
@@ -160,7 +161,7 @@ static void test_compact_status_and_electrical_parse(void)
 
     EXPECT_TRUE(ams_parse_can_frame(&ams, AMS_ECU_ELECTRICAL_CANBUS_ID, true, 8u, electrical, 110u));
     EXPECT_TRUE(ams.compact_electrical_valid);
-    EXPECT_EQ_U16(ams.pack_voltage_0p1v, 3200u);
+    EXPECT_EQ_U16(ams.pack_voltage_0p1v, 3000u);
     EXPECT_EQ_I16(ams.pack_current_0p1a, 123);
     EXPECT_EQ_U16(ams.min_cell_mv, 3050u);
     EXPECT_EQ_U16(ams.max_cell_mv, 4200u);

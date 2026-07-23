@@ -50,7 +50,7 @@ static void status_frame(uint8_t frame[8], uint8_t seq, uint8_t status_flags, ui
 
 static bool parse_good_summaries(ams_t *ams, uint32_t now_ms)
 {
-    const uint8_t electrical[8] = {0x0Cu, 0x80u, 0u, 0u, 0x0Bu, 0xB8u, 0x10u, 0x04u};
+    const uint8_t electrical[8] = {0x0Bu, 0xB8u, 0u, 0u, 0x0Bu, 0xB8u, 0x10u, 0x04u};
     const uint8_t thermal[8] = {0x01u, 0x2Cu, 0x00u, 0xC8u, 0x00u, 0xFAu, 50u, 0u};
     return (ams_parse_can_frame(ams, AMS_ECU_ELECTRICAL_CANBUS_ID, true, 8u, electrical, now_ms) &&
             ams_parse_can_frame(ams, AMS_ECU_THERMAL_CANBUS_ID, true, 8u, thermal, now_ms));

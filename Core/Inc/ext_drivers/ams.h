@@ -11,15 +11,17 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "ext_drivers/ams_power_consumer.h"
+
 #define NSEGS 5
 #define NFANS 10
 #define NVOLTS 15
-#define NTEMPS 17
+#define NTEMPS 24
 
 /* Legacy paged AMS telemetry. Kept for bench compatibility. */
 #define AMS_TELEM_CANBUS_ID 0x69u
 #define AMS_ESTIMATOR_CANBUS_ID 0x421u
-#define AMS_PACKET_COUNT 62u
+#define AMS_PACKET_COUNT 72u
 
 /* Compact AMS->ECU frames from the hardened AMS firmware. */
 #define AMS_ECU_STATUS_CANBUS_ID 0x680u
@@ -27,6 +29,11 @@
 #define AMS_ECU_THERMAL_CANBUS_ID 0x682u
 #define AMS_ECU_HEALTH_CANBUS_ID 0x683u
 #define AMS_ECU_COMPACT_PROTOCOL_VERSION 1u
+
+/* Authoritative SoP/SoH protocol v2 from AMS v0.3.3+. */
+#ifndef AMS_POWER_AUTHORITY_REQUIRED_FOR_TORQUE
+#define AMS_POWER_AUTHORITY_REQUIRED_FOR_TORQUE 1u
+#endif
 
 #define AMS_FRAME_DLC 8u
 #define AMS_STALE_TIMEOUT_MS 500u
@@ -36,12 +43,22 @@
 #define AMS_CELL_VALID_MIN_MV       500u
 #define AMS_CELL_VALID_MAX_MV      5000u
 #define AMS_PACK_VALID_MAX_0P1V   10000u
+/* 0x681 pack voltage is rounded to 0.1 V; allow source/cell-sum rounding. */
+#define AMS_PACK_CELL_SUM_TOLERANCE_MV 200u
 #define AMS_CURRENT_VALID_MIN_0P1A (-10000)
 #define AMS_CURRENT_VALID_MAX_0P1A  10000
 #define AMS_TEMP_VALID_MIN_0P1C     (-400)
 #define AMS_TEMP_VALID_MAX_0P1C      1500
 #define AMS_TOTAL_CELL_COUNT           75u
-#define AMS_TOTAL_TEMP_COUNT           85u
+#define AMS_TOTAL_TEMP_COUNT          120u
+
+_Static_assert(AMS_TOTAL_CELL_COUNT == (NSEGS * NVOLTS),
+               "AMS cell-count contract must match segment layout");
+_Static_assert(AMS_TOTAL_TEMP_COUNT == (NSEGS * NTEMPS),
+               "AMS temperature-count contract must match segment layout");
+_Static_assert(AMS_PACKET_COUNT ==
+               (3u + (NSEGS * 5u) + (NSEGS * 8u) + 4u),
+               "Legacy AMS packet count must cover status, cells, temps, fans");
 
 #define AMS_THERMAL_OVERTEMP_FAULT_BIT       4u
 #define AMS_THERMAL_SEVERE_OVERTEMP_BIT      5u
@@ -68,6 +85,7 @@ typedef struct
 typedef struct
 {
     uint16_t words[4];
+
     uint32_t last_rx_tick;
     uint32_t rx_count;
     bool valid;
@@ -156,6 +174,14 @@ typedef struct
     bool compact_health_stale;
     uint32_t last_health_rx_tick;
 
+
+    /* Authoritative dynamic power envelope (0x684-0x687) plus optional
+     * strategy/resource (0x689) and binding metadata (0x68A). */
+    der26_power_consumer_t power_consumer;
+    der26_power_immediate_authority_t power_authority;
+    bool power_authority_valid;
+    bool power_authority_stale;
+
     uint32_t last_rx_tick;
     uint32_t rx_count;
     uint32_t bad_rx_count;
@@ -172,5 +198,25 @@ bool ams_is_known_can_id(uint32_t std_id);
 void ams_invalidate_can_frame(ams_t *dev, uint32_t std_id);
 void ams_update_stale(ams_t *dev, uint32_t now_ms);
 bool ams_allows_torque(const ams_t *dev);
+bool ams_power_authority_allows_torque_command(
+    const der26_power_immediate_authority_t *authority,
+    int16_t torque_0p1nm);
+
+bool ams_get_immediate_power_authority(const ams_t *dev,
+                                       uint32_t now_ms,
+                                       der26_power_immediate_authority_t *authority);
+bool ams_get_feasibility_envelope(const ams_t *dev,
+                                  uint32_t now_ms,
+                                  der26_power_feasibility_envelope_t *envelope);
+bool ams_get_power_resource_state(const ams_t *dev,
+                                  uint32_t now_ms,
+                                  der26_power_resource_state_t *resource);
+bool ams_get_power_soh(const ams_t *dev,
+                       uint32_t now_ms,
+                       der26_power_soh_t *soh);
+bool ams_encode_mission_request(uint8_t profile,
+                                uint8_t counter,
+                                bool stationary_confirmed,
+                                uint8_t payload[8]);
 
 #endif /* __AMS_H_ */

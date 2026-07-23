@@ -1,6 +1,7 @@
 #include "ext_drivers/ams.h"
 #include "ext_drivers/cm200.h"
 
+#include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -86,7 +87,7 @@ static void make_packet(uint8_t frame[8], uint16_t header, uint16_t d0, uint16_t
 
 static void feed_good_compact_summaries(ams_t *ams, uint32_t now_ms)
 {
-    const uint8_t electrical[8] = {0x0Cu, 0x80u, 0x00u, 0x00u, 0x0Bu, 0xB8u, 0x10u, 0x04u};
+    const uint8_t electrical[8] = {0x0Bu, 0xB8u, 0x00u, 0x00u, 0x0Bu, 0xB8u, 0x10u, 0x04u};
     const uint8_t thermal[8] = {0x01u, 0x2Cu, 0x00u, 0xC8u, 0x00u, 0xFAu, 50u, 0u};
     EXPECT_TRUE(ams_parse_can_frame(ams, AMS_ECU_ELECTRICAL_CANBUS_ID, true, 8u, electrical, now_ms));
     EXPECT_TRUE(ams_parse_can_frame(ams, AMS_ECU_THERMAL_CANBUS_ID, true, 8u, thermal, now_ms));
@@ -125,7 +126,7 @@ static void test_ams_init_clears_poisoned_state(void)
 
     EXPECT_EQ_U16(NSEGS, 5u);
     EXPECT_EQ_U16(NVOLTS, 15u);
-    EXPECT_EQ_U16(NTEMPS, 17u);
+    EXPECT_EQ_U16(NTEMPS, 24u);
     EXPECT_EQ_U16(NFANS, 10u);
     EXPECT_EQ_U32(ams.rx_count, 0u);
     EXPECT_EQ_U32(ams.bad_rx_count, 0u);
@@ -214,11 +215,11 @@ static void test_all_temperature_packets_cover_tail_safely(void)
     uint8_t frame[8];
     ams_init(&ams);
 
-    for(uint16_t header = 28u; header <= 57u; header++)
+    for(uint16_t header = 28u; header <= 67u; header++)
     {
         uint16_t offset = (uint16_t)(header - 28u);
-        uint16_t seg = (uint16_t)(offset / 6u);
-        uint16_t group = (uint16_t)(offset % 6u);
+        uint16_t seg = (uint16_t)(offset / 8u);
+        uint16_t group = (uint16_t)(offset % 8u);
         uint16_t base = (uint16_t)(group * 3u);
         uint16_t t0 = (uint16_t)(2000u + (seg * 100u) + base + 0u);
         uint16_t t1 = (uint16_t)(2000u + (seg * 100u) + base + 1u);
@@ -237,8 +238,8 @@ static void test_all_temperature_packets_cover_tail_safely(void)
         }
     }
 
-    EXPECT_EQ_U32(ams.rx_count, 30u);
-    EXPECT_EQ_U16(ams.last_packet_header, 57u);
+    EXPECT_EQ_U32(ams.rx_count, 40u);
+    EXPECT_EQ_U16(ams.last_packet_header, 67u);
 }
 
 static void test_all_fan_packets_cover_only_10_fans(void)
@@ -247,9 +248,9 @@ static void test_all_fan_packets_cover_only_10_fans(void)
     uint8_t frame[8];
     ams_init(&ams);
 
-    for(uint16_t header = 58u; header <= 61u; header++)
+    for(uint16_t header = 68u; header <= 71u; header++)
     {
-        uint16_t base = (uint16_t)((header - 58u) * 3u);
+        uint16_t base = (uint16_t)((header - 68u) * 3u);
         make_packet(frame, header,
                     (uint16_t)(3000u + base + 0u),
                     (uint16_t)(3000u + base + 1u),
@@ -263,7 +264,7 @@ static void test_all_fan_packets_cover_only_10_fans(void)
     }
 
     EXPECT_EQ_U32(ams.rx_count, 4u);
-    EXPECT_EQ_U16(ams.last_packet_header, 61u);
+    EXPECT_EQ_U16(ams.last_packet_header, 71u);
 }
 
 static void test_invalid_telemetry_frames_rejected_without_mutating_payload(void)
@@ -469,14 +470,14 @@ static void test_compact_status_fault_flags_block_torque(void)
 static void test_compact_electrical_thermal_and_health_frames(void)
 {
     ams_t ams;
-    uint8_t electrical[8] = {0x0Cu, 0x80u, 0xFFu, 0x9Cu, 0x0Bu, 0xEAu, 0x10u, 0x68u};
+    uint8_t electrical[8] = {0x0Bu, 0xB8u, 0xFFu, 0x9Cu, 0x0Bu, 0xEAu, 0x10u, 0x68u};
     uint8_t thermal[8] = {0x01u, 0x59u, 0x00u, 0xF0u, 0x01u, 0x10u, 85u, 0xA5u};
-    uint8_t health[8] = {4u, 14u, 0u, 2u, 3u, 16u, 75u, 85u};
+    uint8_t health[8] = {4u, 14u, 0u, 2u, 3u, 23u, 75u, 120u};
     ams_init(&ams);
 
     EXPECT_TRUE(ams_parse_can_frame(&ams, AMS_ECU_ELECTRICAL_CANBUS_ID, true, 8u, electrical, 50u));
     EXPECT_TRUE(ams.compact_electrical_valid);
-    EXPECT_EQ_U16(ams.pack_voltage_0p1v, 3200u);
+    EXPECT_EQ_U16(ams.pack_voltage_0p1v, 3000u);
     EXPECT_EQ_I16(ams.pack_current_0p1a, -100);
     EXPECT_EQ_U16(ams.min_cell_mv, 3050u);
     EXPECT_EQ_U16(ams.max_cell_mv, 4200u);
@@ -496,10 +497,49 @@ static void test_compact_electrical_thermal_and_health_frames(void)
     EXPECT_EQ_U8(ams.min_voltage_segment, 0u);
     EXPECT_EQ_U8(ams.min_voltage_cell, 2u);
     EXPECT_EQ_U8(ams.max_temp_segment, 3u);
-    EXPECT_EQ_U8(ams.max_temp_sensor, 16u);
+    EXPECT_EQ_U8(ams.max_temp_sensor, 23u);
     EXPECT_EQ_U8(ams.usable_cell_count, 75u);
-    EXPECT_EQ_U8(ams.usable_temp_count, 85u);
+    EXPECT_EQ_U8(ams.usable_temp_count, 120u);
     EXPECT_EQ_U32(ams.rx_count, 3u);
+}
+
+static void test_compact_pack_voltage_matches_cell_bounds(void)
+{
+    ams_t ams;
+    uint8_t electrical[8] = {0x0Bu, 0xB8u, 0u, 0u, 0x0Bu, 0xB8u, 0x10u, 0x04u};
+    ams_init(&ams);
+
+    EXPECT_TRUE(ams_parse_can_frame(&ams,
+                                    AMS_ECU_ELECTRICAL_CANBUS_ID,
+                                    true,
+                                    8u,
+                                    electrical,
+                                    10u));
+    EXPECT_TRUE(ams.compact_electrical_sane);
+
+    /* A zero or implausibly high pack summary cannot be reconciled with 75
+     * cells bounded by the transmitted minimum and maximum.  The frame is
+     * received for diagnostics, but must not become trusted torque-gate data. */
+    electrical[0] = 0u;
+    electrical[1] = 0u;
+    EXPECT_TRUE(ams_parse_can_frame(&ams,
+                                    AMS_ECU_ELECTRICAL_CANBUS_ID,
+                                    true,
+                                    8u,
+                                    electrical,
+                                    11u));
+    EXPECT_TRUE(ams.compact_electrical_valid);
+    EXPECT_FALSE(ams.compact_electrical_sane);
+
+    electrical[0] = 0x0Fu;
+    electrical[1] = 0xA0u; /* 400.0 V > 75 * 4.100 V. */
+    EXPECT_TRUE(ams_parse_can_frame(&ams,
+                                    AMS_ECU_ELECTRICAL_CANBUS_ID,
+                                    true,
+                                    8u,
+                                    electrical,
+                                    12u));
+    EXPECT_FALSE(ams.compact_electrical_sane);
 }
 
 static void test_compact_status_drives_stale_and_sequence_checks(void)
@@ -540,7 +580,7 @@ static void test_compact_summary_freshness_thermal_and_sanity_gates(void)
 {
     ams_t ams;
     uint8_t status[8] = {AMS_ECU_COMPACT_PROTOCOL_VERSION, 1u, 1u, 0x71u, 0u, 0u, 0u, 0u};
-    uint8_t electrical[8] = {0x0Cu, 0x80u, 0u, 0u, 0x10u, 0u, 0x0Fu, 0u};
+    uint8_t electrical[8] = {0x0Bu, 0xB8u, 0u, 0u, 0x10u, 0u, 0x0Fu, 0u};
     uint8_t thermal[8] = {0u, 100u, 0u, 50u, 0u, 75u, 50u, 0u};
     ams_init(&ams);
 
@@ -604,7 +644,7 @@ static void test_invalid_required_ams_frame_revokes_torque_immediately(void)
 {
     ams_t ams;
     uint8_t status[8] = {AMS_ECU_COMPACT_PROTOCOL_VERSION, 1u, 1u, 0x71u, 0u, 0u, 0u, 0u};
-    uint8_t electrical[8] = {0x0Cu, 0x80u, 0u, 0u, 0x0Bu, 0xB8u, 0x10u, 0x04u};
+    uint8_t electrical[8] = {0x0Bu, 0xB8u, 0u, 0u, 0x0Bu, 0xB8u, 0x10u, 0x04u};
 
     ams_init(&ams);
     EXPECT_TRUE(ams_parse_can_frame(&ams, AMS_ECU_STATUS_CANBUS_ID, true, 8u, status, 10u));
@@ -620,6 +660,42 @@ static void test_invalid_required_ams_frame_revokes_torque_immediately(void)
     EXPECT_FALSE(ams.compact_electrical_valid);
     EXPECT_TRUE(ams.compact_electrical_stale);
     EXPECT_FALSE(ams_allows_torque(&ams));
+}
+
+static void test_power_authority_direction_gate(void)
+{
+    der26_power_immediate_authority_t authority;
+    memset(&authority, 0, sizeof(authority));
+
+    EXPECT_FALSE(ams_power_authority_allows_torque_command(NULL, 100));
+    EXPECT_FALSE(ams_power_authority_allows_torque_command(&authority, 100));
+
+    authority.valid = 1u;
+    authority.discharge.authorized = 1u;
+    authority.discharge.current_limit_a = 80.0f;
+    authority.discharge.power_limit_w = 20000.0f;
+    EXPECT_TRUE(ams_power_authority_allows_torque_command(&authority, 100));
+    EXPECT_FALSE(ams_power_authority_allows_torque_command(&authority, -100));
+    EXPECT_TRUE(ams_power_authority_allows_torque_command(&authority, 0));
+
+    authority.discharge.authorized = 0u;
+    authority.discharge.current_limit_a = 0.0f;
+    authority.discharge.power_limit_w = 0.0f;
+    authority.charge_regen.authorized = 1u;
+    authority.charge_regen.current_limit_a = 10.0f;
+    authority.charge_regen.power_limit_w = 2500.0f;
+    EXPECT_FALSE(ams_power_authority_allows_torque_command(&authority, 100));
+    EXPECT_TRUE(ams_power_authority_allows_torque_command(&authority, -100));
+    EXPECT_TRUE(ams_power_authority_allows_torque_command(&authority, 0));
+
+    authority.charge_regen.power_limit_w = 0.0f;
+    EXPECT_FALSE(ams_power_authority_allows_torque_command(&authority, -100));
+    EXPECT_FALSE(ams_power_authority_allows_torque_command(&authority, 0));
+
+    authority.charge_regen.power_limit_w = INFINITY;
+    EXPECT_FALSE(ams_power_authority_allows_torque_command(&authority, -100));
+    authority.charge_regen.power_limit_w = NAN;
+    EXPECT_FALSE(ams_power_authority_allows_torque_command(&authority, -100));
 }
 
 static void test_cm200_broadcast_decoding_and_required_gate(void)
@@ -812,10 +888,12 @@ int main(void)
     run_test("compact status frame sets torque gate fields", test_compact_status_frame_sets_torque_gate_fields);
     run_test("compact status fault flags block torque", test_compact_status_fault_flags_block_torque);
     run_test("compact electrical thermal and health frames", test_compact_electrical_thermal_and_health_frames);
+    run_test("compact pack voltage matches cell bounds", test_compact_pack_voltage_matches_cell_bounds);
     run_test("compact status drives stale and sequence checks", test_compact_status_drives_stale_and_sequence_checks);
     run_test("compact summary freshness thermal and sanity gates", test_compact_summary_freshness_thermal_and_sanity_gates);
     run_test("compact invalid frames rejected without mutation", test_compact_invalid_frames_rejected_without_mutation);
     run_test("invalid required AMS frame revokes torque immediately", test_invalid_required_ams_frame_revokes_torque_immediately);
+    run_test("power authority direction gate", test_power_authority_direction_gate);
     run_test("CM200 broadcast decoding and required gate", test_cm200_broadcast_decoding_and_required_gate);
     run_test("CM200 malformed and freshness fail closed", test_cm200_malformed_and_freshness_fail_closed);
     run_test("CM200 counter echo and timer guards", test_cm200_counter_echo_fault_and_timer_reset_detection);

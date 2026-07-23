@@ -8,7 +8,7 @@ Perform these stages in order. Keep HV, AIR control, inverter phase outputs, and
 2. Clean and rebuild the complete CubeIDE project.
 3. Review the ELF/map for STM32F767, expected task/source inclusion, memory use, and discarded/retained safety paths.
 4. Flash with HV, AIRs, inverter enable, and actuator loads disconnected.
-5. Run `ver`; require a v2.4.0 bench image with `inhibited:1`, `bspd_3v3:0`, and `cm200_contract:0` unless a test record already closes those contracts.
+5. Run `ver`; require a v2.5.1 bench image with `inhibited:1`, `bspd_3v3:0`, `cm200_contract:0`, `ams_clamp_impl:0`, and `ams_clamp_valid:0` unless the corresponding test records already close those contracts. The v2.5.1 vehicle profile is intentionally source-locked until the numeric AMS current-to-torque clamp exists.
 6. Run `tasks` during every long bench session and retain minimum stack high-water marks.
 
 ## Stage 1 — power and output defaults

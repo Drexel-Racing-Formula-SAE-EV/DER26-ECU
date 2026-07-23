@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Whole-application GCC analyzer pass. This host parse does not replace the
-# STM32/ARM target build, but it covers all application sources in both locked
-# build profiles with the same device and RTOS headers used by the syntax pass.
+# Whole-application GCC analyzer pass for the buildable bench profile. This
+# host parse does not replace the STM32/ARM target build. The vehicle profile is
+# intentionally source-locked until the numeric AMS current clamp exists and is
+# checked separately by check_core_host_syntax.sh/profile-gates.
 
 ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 
@@ -41,8 +42,5 @@ SOURCES=()
 while IFS= read -r src; do SOURCES+=("$src"); done < <(find "$ROOT_DIR/Core/Src" -name "*.c" -print | sort)
 
 gcc "${COMMON[@]}" -DECU_BUILD_PROFILE=0 "${INCLUDES[@]}" "${SOURCES[@]}"
-gcc "${COMMON[@]}" -DECU_BUILD_PROFILE=1 -DECU_BSPD_INTERFACE_3V3_VALIDATED=1 \
-  -DECU_CM200_CAN_CONTRACT_VALIDATED=1 \
-  "${INCLUDES[@]}" "${SOURCES[@]}"
 
-echo "GCC full-source analyzer passed for bench and vehicle profiles (${#SOURCES[@]} files each)."
+echo "GCC full-source analyzer passed for bench profile (${#SOURCES[@]} files)."

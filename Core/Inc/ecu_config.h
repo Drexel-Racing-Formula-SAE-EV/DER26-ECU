@@ -45,7 +45,7 @@
 #error "Vehicle profile requires a validated 12 V BSPD-OK to 3.3 V PE13 interface"
 #endif
 
-/* The v2.4 torque gate depends on these CM200 EEPROM/CAN settings being
+/* The torque gate depends on these CM200 EEPROM/CAN settings being
  * measured on the real controller: standard 11-bit offset 0x0A0, required
  * A5/A7/AA/AB/AC/B1 broadcasts active at the documented rates, CAN torque
  * mode, and rolling-counter checking enabled. */
@@ -61,6 +61,43 @@
 #if ((ECU_BUILD_PROFILE == ECU_BUILD_PROFILE_VEHICLE) && \
      (ECU_CM200_CAN_CONTRACT_VALIDATED != 1))
 #error "Vehicle profile requires validated CM200 broadcast IDs/rates/mode/counter settings"
+#endif
+
+
+/* Power protocol v2 reception is integrated, but the numeric conservative
+ * torque-to-DC-current/power clamp is not implemented yet.  This source-owned
+ * latch deliberately cannot be enabled from a compiler command line: the
+ * implementation commit must change it to 1 after the stall/low-speed-safe
+ * clamp and its tests exist. */
+#ifdef ECU_AMS_POWER_CLAMP_IMPLEMENTED
+#error "ECU_AMS_POWER_CLAMP_IMPLEMENTED is source controlled; do not define it externally"
+#endif
+#define ECU_AMS_POWER_CLAMP_IMPLEMENTED 0
+
+#if ((ECU_AMS_POWER_CLAMP_IMPLEMENTED != 0) && \
+     (ECU_AMS_POWER_CLAMP_IMPLEMENTED != 1))
+#error "ECU_AMS_POWER_CLAMP_IMPLEMENTED must be 0 or 1"
+#endif
+
+/* Independent evidence acknowledgement.  This may be supplied by a release
+ * build only after the source-owned implementation latch is enabled. */
+#ifndef ECU_AMS_POWER_CLAMP_VALIDATED
+#define ECU_AMS_POWER_CLAMP_VALIDATED 0
+#endif
+
+#if ((ECU_AMS_POWER_CLAMP_VALIDATED != 0) && \
+     (ECU_AMS_POWER_CLAMP_VALIDATED != 1))
+#error "ECU_AMS_POWER_CLAMP_VALIDATED must be 0 or 1"
+#endif
+
+#if ((ECU_BUILD_PROFILE == ECU_BUILD_PROFILE_VEHICLE) && \
+     (ECU_AMS_POWER_CLAMP_IMPLEMENTED != 1))
+#error "Vehicle profile requires the conservative AMS DCL/CCL torque clamp implementation"
+#endif
+
+#if ((ECU_BUILD_PROFILE == ECU_BUILD_PROFILE_VEHICLE) && \
+     (ECU_AMS_POWER_CLAMP_VALIDATED != 1))
+#error "Vehicle profile requires validation evidence for the conservative AMS DCL/CCL torque clamp"
 #endif
 
 #define ECU_OUTPUTS_INHIBITED (ECU_BUILD_PROFILE != ECU_BUILD_PROFILE_VEHICLE)

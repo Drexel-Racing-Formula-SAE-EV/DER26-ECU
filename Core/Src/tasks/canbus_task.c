@@ -25,9 +25,14 @@
  */
 void canbus_task_fn(void *arg);
 
-static bool canbus_torque_still_allowed(app_data_t *data)
+static bool canbus_torque_still_allowed_locked(app_data_t *data,
+                                               int16_t torque_0p1nm,
+                                               uint32_t now_ms)
 {
     bool protocol_ready;
+    bool power_ready;
+    der26_power_immediate_authority_t authority;
+    memset(&authority, 0, sizeof(authority));
     const ecu_torque_inputs_t inputs = {
         .cascadia_ok = data->cascadia_ok,
         .hard_fault = data->hard_fault,
@@ -35,7 +40,10 @@ static bool canbus_torque_still_allowed(app_data_t *data)
         .bppc_fault = data->bppc_fault,
         .bse_fault = data->bse_fault,
         .ams_fault = data->ams_fault,
-        .canbus_fault = data->canbus_fault,
+        /* Include the ISR-owned hardware fault directly.  The lower-rate
+         * aggregate canbus_fault may not have observed it yet, and the CAN
+         * task can clear a recovered transient after a successful send. */
+        .canbus_fault = (data->canbus_fault || data->canbus_hw_fault),
         .canbus_rx_fault = data->canbus_rx_fault,
         .canbus_tx_fault = data->canbus_tx_fault,
         .imd_fail = data->imd_fail,
@@ -45,13 +53,21 @@ static bool canbus_torque_still_allowed(app_data_t *data)
         .rtd_mode = data->rtd_mode,
     };
 
-    taskENTER_CRITICAL();
+    /* Caller holds the RTOS critical section.  That freezes the CAN RX ISR and
+     * task-owned safety state while this final command snapshot is checked. */
+    power_ready = ams_get_immediate_power_authority(
+        &data->board.ams, now_ms, &authority);
     protocol_ready = (ams_allows_torque(&data->board.ams) &&
                       cm200_allows_torque(&data->board.cm200));
-    taskEXIT_CRITICAL();
+
+    /* Numeric DCL/P limits are not converted to torque here yet; that requires
+     * the separately validated conservative torque-to-DC-current model. */
+    power_ready = power_ready &&
+        ams_power_authority_allows_torque_command(&authority, torque_0p1nm);
 
     return (!ECU_OUTPUTS_INHIBITED &&
             protocol_ready &&
+            power_ready &&
             ecu_torque_allowed(&inputs));
 }
 
@@ -101,16 +117,56 @@ void canbus_task_fn(void *arg)
             ecu_cm200_build_disable_packet(can_packet.data);
         }
 
+        tx_status = canbus_wait_tx_ready(canbus, CANBUS_TX_TIMEOUT_MS);
+        if(tx_status != HAL_OK)
+        {
+            data->canbus_tx_fault = true;
+            continue;
+        }
+
         if(can_packet.id == CM_CANBUS_ID)
         {
+            const uint8_t transmitted_counter = data->cm200_rolling_counter;
+            uint32_t commit_now_ms;
+
+            /* This is the final transmit-path authority check.  It occurs
+             * after any mailbox wait, and CAN RX remains masked until the
+             * selected enable/torque packet has been committed to a hardware
+             * mailbox.  A zero/inhibit accepted before this point therefore
+             * cannot be bypassed by an older queued command. */
+            taskENTER_CRITICAL();
+            commit_now_ms = HAL_GetTick();
             if(ecu_cm200_packet_enabled(can_packet.data) &&
-               !canbus_torque_still_allowed(data))
+               !canbus_torque_still_allowed_locked(
+                   data, ecu_cm200_packet_torque(can_packet.data),
+                   commit_now_ms))
             {
                 ecu_cm200_build_disable_packet(can_packet.data);
             }
-            ecu_cm200_apply_rolling_counter(can_packet.data, data->cm200_rolling_counter);
+            ecu_cm200_apply_rolling_counter(can_packet.data,
+                                            transmitted_counter);
+            tx_status = canbus_transmit_ready(canbus, &can_packet);
+            if(tx_status == HAL_OK)
+            {
+                cm200_note_command_tx(&data->board.cm200,
+                                      transmitted_counter,
+                                      ecu_cm200_packet_enabled(can_packet.data),
+                                      ecu_cm200_packet_torque(can_packet.data),
+                                      commit_now_ms);
+            }
+            taskEXIT_CRITICAL();
+
+            if(tx_status == HAL_OK)
+            {
+                data->cm200_rolling_counter =
+                    ecu_cm200_next_rolling_counter(transmitted_counter);
+            }
         }
-        tx_status = canbus_transmit(canbus, &can_packet, CANBUS_TX_TIMEOUT_MS);
+        else
+        {
+            tx_status = canbus_transmit_ready(canbus, &can_packet);
+        }
+
         if(tx_status != HAL_OK)
         {
             data->canbus_tx_fault = true;
@@ -126,18 +182,6 @@ void canbus_task_fn(void *arg)
             (void)HAL_CAN_ResetError(canbus->hcan);
             data->canbus_hw_fault = false;
             data->can_error_code = HAL_CAN_ERROR_NONE;
-        }
-        if(can_packet.id == CM_CANBUS_ID)
-        {
-            const uint8_t transmitted_counter = data->cm200_rolling_counter;
-            taskENTER_CRITICAL();
-            cm200_note_command_tx(&data->board.cm200,
-                                  transmitted_counter,
-                                  ecu_cm200_packet_enabled(can_packet.data),
-                                  ecu_cm200_packet_torque(can_packet.data),
-                                  HAL_GetTick());
-            taskEXIT_CRITICAL();
-            data->cm200_rolling_counter = ecu_cm200_next_rolling_counter(transmitted_counter);
         }
     }
 }

@@ -69,6 +69,7 @@ Only define:
 ECU_BUILD_PROFILE=1
 ECU_BSPD_INTERFACE_3V3_VALIDATED=1
 ECU_CM200_CAN_CONTRACT_VALIDATED=1
+ECU_AMS_POWER_CLAMP_VALIDATED=1
 ```
 
-after the interface schematic is reviewed, assembled, electrically measured, fault-injected, and documented, and after the independent CM200 contract is validated. The acknowledgements are build interlocks, not automated proof.
+after the interface schematic is reviewed, assembled, electrically measured, fault-injected, and documented; after the independent CM200 contract is validated; and after the conservative low-speed/stall-safe AMS DCL/CCL torque clamp is implemented and validated. The source-owned `ECU_AMS_POWER_CLAMP_IMPLEMENTED` latch must also be changed by the implementation commit; it cannot be supplied from build flags. These acknowledgements are build interlocks, not automated proof.

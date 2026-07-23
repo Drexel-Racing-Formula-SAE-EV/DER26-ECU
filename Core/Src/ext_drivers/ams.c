@@ -5,6 +5,7 @@
  *      Author: cole
  */
 
+#include <math.h>
 #include <stddef.h>
 #include <string.h>
 
@@ -46,6 +47,20 @@ static void refresh_compact_stale_flag(ams_t *dev)
                   !dev->compact_thermal_valid || dev->compact_thermal_stale);
 }
 
+static void refresh_power_authority_cache(ams_t *dev, uint32_t now_ms)
+{
+    if(dev == NULL)
+    {
+        return;
+    }
+
+    memset(&dev->power_authority, 0, sizeof(dev->power_authority));
+    dev->power_authority_valid =
+        der26_power_consumer_get_immediate_authority(
+            &dev->power_consumer, now_ms, &dev->power_authority);
+    dev->power_authority_stale = !dev->power_authority_valid;
+}
+
 void ams_invalidate_can_frame(ams_t *dev, uint32_t std_id)
 {
     if(dev == NULL)
@@ -74,6 +89,23 @@ void ams_invalidate_can_frame(ams_t *dev, uint32_t std_id)
             dev->compact_health_valid = false;
             dev->compact_health_sane = false;
             dev->compact_health_stale = true;
+            break;
+        case DER26_POWER_DCL_ID:
+        case DER26_POWER_CCL_ID:
+        case DER26_POWER_SOH_ID:
+        case DER26_POWER_ENVELOPE_ID:
+            der26_power_consumer_invalidate_id(&dev->power_consumer,
+                                               (uint16_t)std_id);
+            dev->power_authority_valid = false;
+            dev->power_authority_stale = true;
+            memset(&dev->power_authority, 0, sizeof(dev->power_authority));
+            break;
+        case DER26_POWER_STRATEGY_ID:
+        case DER26_POWER_BINDINGS_ID:
+            /* 0x689/0x68A are advisory.  A malformed optional frame must not
+             * revoke an otherwise valid 0x684-0x687 authority bundle. */
+            der26_power_consumer_invalidate_id(&dev->power_consumer,
+                                               (uint16_t)std_id);
             break;
         default:
             break;
@@ -108,6 +140,9 @@ void ams_init(ams_t *dev)
     }
 
     memset(dev, 0, sizeof(*dev));
+    der26_power_consumer_init(&dev->power_consumer);
+    dev->power_authority_valid = false;
+    dev->power_authority_stale = true;
 
     for(int i = 0; i < NSEGS; i++)
     {
@@ -165,11 +200,11 @@ static ams_packet_map_t ams_get_packet_map(ams_t *ams, uint16_t header)
         return pkt;
     }
 
-    if((header >= 28u) && (header <= 57u))
+    if((header >= 28u) && (header <= 67u))
     {
         uint16_t offset = (uint16_t)(header - 28u);
-        uint16_t seg = (uint16_t)(offset / 6u);
-        uint16_t group = (uint16_t)(offset % 6u);
+        uint16_t seg = (uint16_t)(offset / 8u);
+        uint16_t group = (uint16_t)(offset % 8u);
         uint16_t base = (uint16_t)(group * 3u);
 
         if((seg < NSEGS) && (base < NTEMPS))
@@ -187,9 +222,9 @@ static ams_packet_map_t ams_get_packet_map(ams_t *ams, uint16_t header)
         return pkt;
     }
 
-    if((header >= 58u) && (header <= 61u))
+    if((header >= 68u) && (header <= 71u))
     {
-        uint16_t base = (uint16_t)((header - 58u) * 3u);
+        uint16_t base = (uint16_t)((header - 68u) * 3u);
         if(base < NFANS)
         {
             pkt.d0 = &ams->fans[base + 0u];
@@ -231,8 +266,12 @@ bool ams_parse_telemetry_frame(ams_t *dev, const uint8_t *data, uint8_t dlc, uin
     }
 
     ams_packet_map_t pkt = ams_get_packet_map(dev, header);
-    if(pkt.header != header)
+    if((pkt.header != header) ||
+       ((pkt.d0 == NULL) && (pkt.d1 == NULL) && (pkt.d2 == NULL)))
     {
+        /* A header inside the nominal packet-count range must still resolve
+         * to at least one real destination.  This catches future layout/count
+         * edits that otherwise would accept and silently discard a frame. */
         dev->bad_rx_count++;
         return false;
     }
@@ -364,12 +403,25 @@ static bool ams_parse_compact_electrical_frame(ams_t *dev, const uint8_t *data, 
     dev->pack_current_0p1a = s16_be(&data[2]);
     dev->min_cell_mv = u16_be(&data[4]);
     dev->max_cell_mv = u16_be(&data[6]);
+    const uint32_t pack_voltage_mv =
+        (uint32_t)dev->pack_voltage_0p1v * 100u;
+    const uint32_t minimum_possible_pack_mv =
+        (uint32_t)dev->min_cell_mv * AMS_TOTAL_CELL_COUNT;
+    const uint32_t maximum_possible_pack_mv =
+        (uint32_t)dev->max_cell_mv * AMS_TOTAL_CELL_COUNT;
+    const bool pack_voltage_matches_cell_bounds =
+        ((pack_voltage_mv + AMS_PACK_CELL_SUM_TOLERANCE_MV) >=
+         minimum_possible_pack_mv) &&
+        (pack_voltage_mv <=
+         (maximum_possible_pack_mv + AMS_PACK_CELL_SUM_TOLERANCE_MV));
+
     dev->compact_electrical_valid = true;
     dev->compact_electrical_sane =
         ((dev->min_cell_mv >= AMS_CELL_VALID_MIN_MV) &&
          (dev->min_cell_mv <= dev->max_cell_mv) &&
          (dev->max_cell_mv <= AMS_CELL_VALID_MAX_MV) &&
          (dev->pack_voltage_0p1v <= AMS_PACK_VALID_MAX_0P1V) &&
+         pack_voltage_matches_cell_bounds &&
          (dev->pack_current_0p1a >= AMS_CURRENT_VALID_MIN_0P1A) &&
          (dev->pack_current_0p1a <= AMS_CURRENT_VALID_MAX_0P1A));
     dev->compact_electrical_stale = false;
@@ -449,7 +501,13 @@ bool ams_is_known_can_id(uint32_t std_id)
             (std_id == AMS_ECU_STATUS_CANBUS_ID) ||
             (std_id == AMS_ECU_ELECTRICAL_CANBUS_ID) ||
             (std_id == AMS_ECU_THERMAL_CANBUS_ID) ||
-            (std_id == AMS_ECU_HEALTH_CANBUS_ID));
+            (std_id == AMS_ECU_HEALTH_CANBUS_ID) ||
+            (std_id == DER26_POWER_DCL_ID) ||
+            (std_id == DER26_POWER_CCL_ID) ||
+            (std_id == DER26_POWER_SOH_ID) ||
+            (std_id == DER26_POWER_ENVELOPE_ID) ||
+            (std_id == DER26_POWER_STRATEGY_ID) ||
+            (std_id == DER26_POWER_BINDINGS_ID));
 }
 
 bool ams_parse_can_frame(ams_t *dev, uint32_t std_id, bool is_standard, uint8_t dlc, const uint8_t *data, uint32_t now_ms)
@@ -500,6 +558,37 @@ bool ams_parse_can_frame(ams_t *dev, uint32_t std_id, bool is_standard, uint8_t 
         return ams_parse_compact_health_frame(dev, data, dlc, now_ms);
     }
 
+    if((std_id == DER26_POWER_DCL_ID) ||
+       (std_id == DER26_POWER_CCL_ID) ||
+       (std_id == DER26_POWER_SOH_ID) ||
+       (std_id == DER26_POWER_ENVELOPE_ID) ||
+       (std_id == DER26_POWER_STRATEGY_ID) ||
+       (std_id == DER26_POWER_BINDINGS_ID))
+    {
+        const bool accepted = der26_power_consumer_ingest(
+            &dev->power_consumer, (uint16_t)std_id, false, false, dlc, data,
+            now_ms);
+        if((std_id >= DER26_POWER_DCL_ID) &&
+           (std_id <= DER26_POWER_ENVELOPE_ID))
+        {
+            /* Keep the task-facing cache coherent immediately in the receive
+             * path.  This makes a CRC/semantic failure fail closed without
+             * waiting for the lower-rate error task, while a partial valid
+             * replacement may continue using the previous bundle only for the
+             * portable consumer's bounded 50 ms staging window. */
+            refresh_power_authority_cache(dev, now_ms);
+        }
+        if(accepted)
+        {
+            mark_rx(dev, now_ms);
+        }
+        else
+        {
+            dev->bad_rx_count++;
+        }
+        return accepted;
+    }
+
     return false;
 }
 
@@ -520,10 +609,8 @@ void ams_update_stale(ams_t *dev, uint32_t now_ms)
         dev->compact_health_stale = (!dev->compact_health_valid ||
             ((uint32_t)(now_ms - dev->last_health_rx_tick) > AMS_STALE_TIMEOUT_MS));
         refresh_compact_stale_flag(dev);
-        return;
     }
-
-    if(dev->rx_count != 0u)
+    else if(dev->rx_count != 0u)
     {
         dev->stale = ((uint32_t)(now_ms - dev->last_rx_tick) > AMS_STALE_TIMEOUT_MS);
     }
@@ -531,6 +618,52 @@ void ams_update_stale(ams_t *dev, uint32_t now_ms)
     {
         dev->stale = true;
     }
+
+    refresh_power_authority_cache(dev, now_ms);
+    return;
+
+}
+
+static bool direction_authority_is_usable(
+    const der26_power_direction_authority_t *direction)
+{
+    return (direction != NULL) &&
+           (direction->authorized != 0u) &&
+           isfinite(direction->current_limit_a) &&
+           isfinite(direction->power_limit_w) &&
+           (direction->current_limit_a > 0.0f) &&
+           (direction->power_limit_w > 0.0f);
+}
+
+bool ams_power_authority_allows_torque_command(
+    const der26_power_immediate_authority_t *authority,
+    int16_t torque_0p1nm)
+{
+    const der26_power_direction_authority_t *direction;
+
+    if((authority == NULL) || (authority->valid == 0u))
+    {
+        return false;
+    }
+
+    if(torque_0p1nm > 0)
+    {
+        direction = &authority->discharge;
+    }
+    else if(torque_0p1nm < 0)
+    {
+        direction = &authority->charge_regen;
+    }
+    else
+    {
+        /* An enabled zero-torque command is acceptable only while at least one
+         * direction has real, nonzero AMS authority.  If both directions are
+         * inhibited/fallback, send the explicit CM200 disable packet instead. */
+        return direction_authority_is_usable(&authority->discharge) ||
+               direction_authority_is_usable(&authority->charge_regen);
+    }
+
+    return direction_authority_is_usable(direction);
 }
 
 bool ams_allows_torque(const ams_t *dev)
@@ -567,8 +700,75 @@ bool ams_allows_torque(const ams_t *dev)
                 !dev->task_heartbeat_fault &&
                 !dev->logger_heartbeat_fault &&
                 dev->compact_protocol_valid &&
-                !dev->compact_sequence_fault);
+                !dev->compact_sequence_fault &&
+#if AMS_POWER_AUTHORITY_REQUIRED_FOR_TORQUE
+                dev->power_authority_valid &&
+                !dev->power_authority_stale &&
+                (ams_power_authority_allows_torque_command(
+                     &dev->power_authority, 1) ||
+                 ams_power_authority_allows_torque_command(
+                     &dev->power_authority, -1))
+#else
+                true
+#endif
+                );
     }
 
     return false;
+}
+
+bool ams_get_immediate_power_authority(const ams_t *dev,
+                                       uint32_t now_ms,
+                                       der26_power_immediate_authority_t *authority)
+{
+    if((dev == NULL) || (authority == NULL))
+    {
+        return false;
+    }
+    return der26_power_consumer_get_immediate_authority(
+        &dev->power_consumer, now_ms, authority);
+}
+
+bool ams_get_feasibility_envelope(const ams_t *dev,
+                                  uint32_t now_ms,
+                                  der26_power_feasibility_envelope_t *envelope)
+{
+    if((dev == NULL) || (envelope == NULL))
+    {
+        return false;
+    }
+    return der26_power_consumer_get_feasibility_envelope(
+        &dev->power_consumer, now_ms, envelope);
+}
+
+bool ams_get_power_resource_state(const ams_t *dev,
+                                  uint32_t now_ms,
+                                  der26_power_resource_state_t *resource)
+{
+    if((dev == NULL) || (resource == NULL))
+    {
+        return false;
+    }
+    return der26_power_consumer_get_resource_state(
+        &dev->power_consumer, now_ms, resource);
+}
+
+bool ams_get_power_soh(const ams_t *dev,
+                       uint32_t now_ms,
+                       der26_power_soh_t *soh)
+{
+    if((dev == NULL) || (soh == NULL))
+    {
+        return false;
+    }
+    return der26_power_consumer_get_soh(&dev->power_consumer, now_ms, soh);
+}
+
+bool ams_encode_mission_request(uint8_t profile,
+                                uint8_t counter,
+                                bool stationary_confirmed,
+                                uint8_t payload[8])
+{
+    return der26_mission_request_encode(profile, counter,
+                                        stationary_confirmed, payload);
 }

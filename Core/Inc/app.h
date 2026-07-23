@@ -22,8 +22,8 @@
 #include "ext_drivers/ecu_safety.h"
 
 #define VER_MAJOR 2
-#define VER_MINOR 4
-#define VER_BUG   0
+#define VER_MINOR 5
+#define VER_BUG   1
 
 #define PLAUSIBILITY_THRESH 10
 #define BRAKE_LIGHT_THRESH 5
