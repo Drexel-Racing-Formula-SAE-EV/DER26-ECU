@@ -90,6 +90,12 @@ void ams_invalidate_can_frame(ams_t *dev, uint32_t std_id)
             dev->compact_health_sane = false;
             dev->compact_health_stale = true;
             break;
+        case AMS_ECU_CURRENT_DIAG_CANBUS_ID:
+            /* Advisory-only diagnostics. Invalidating this frame must never
+             * revoke an otherwise coherent AMS authority bundle. */
+            dev->current_diag_valid = false;
+            dev->current_diag_sane = false;
+            break;
         case DER26_POWER_DCL_ID:
         case DER26_POWER_CCL_ID:
         case DER26_POWER_SOH_ID:
@@ -426,6 +432,10 @@ static bool ams_parse_compact_electrical_frame(ams_t *dev, const uint8_t *data, 
          (dev->pack_current_0p1a <= AMS_CURRENT_VALID_MAX_0P1A));
     dev->compact_electrical_stale = false;
     dev->last_electrical_rx_tick = now_ms;
+    if(dev->compact_electrical_sequence != UINT32_MAX)
+    {
+        dev->compact_electrical_sequence++;
+    }
     mark_rx(dev, now_ms);
     refresh_compact_stale_flag(dev);
     return true;
@@ -494,6 +504,50 @@ static bool ams_parse_compact_health_frame(ams_t *dev, const uint8_t *data, uint
     return true;
 }
 
+static bool ams_parse_current_diag_frame(ams_t *dev,
+                                         const uint8_t *data,
+                                         uint8_t dlc,
+                                         uint32_t now_ms)
+{
+    if((dev == NULL) || (data == NULL) || (dlc != AMS_FRAME_DLC))
+    {
+        if(dev != NULL)
+        {
+            dev->bad_rx_count++;
+        }
+        return false;
+    }
+
+    dev->current_source = data[0];
+    dev->current_quality = data[1];
+    dev->current_boundary = data[2];
+    dev->current_source_epoch = data[3];
+    dev->current_sample_sequence_low = u16_be(&data[4]);
+    dev->current_sample_age_ms = u16_be(&data[6]);
+    dev->current_physical_sample_tick =
+        now_ms - (uint32_t)dev->current_sample_age_ms;
+    dev->current_diag_valid = true;
+    dev->current_diag_sane =
+        (dev->current_source <= 2u) &&
+        (dev->current_quality <= 6u) &&
+        (dev->current_boundary <= 1u) &&
+        (dev->current_sample_age_ms <= AMS_STALE_TIMEOUT_MS) &&
+        (((dev->current_source == 0u) &&
+          (dev->current_quality == 0u) &&
+          (dev->current_boundary == 0u)) ||
+         ((dev->current_source != 0u) &&
+          ((dev->current_quality == 2u) ||
+           (dev->current_quality == 3u)) &&
+          (dev->current_boundary == 1u)));
+    if(dev->current_diag_rx_count != UINT32_MAX)
+    {
+        dev->current_diag_rx_count++;
+    }
+    dev->last_current_diag_rx_tick = now_ms;
+    mark_rx(dev, now_ms);
+    return true;
+}
+
 bool ams_is_known_can_id(uint32_t std_id)
 {
     return ((std_id == AMS_TELEM_CANBUS_ID) ||
@@ -502,6 +556,7 @@ bool ams_is_known_can_id(uint32_t std_id)
             (std_id == AMS_ECU_ELECTRICAL_CANBUS_ID) ||
             (std_id == AMS_ECU_THERMAL_CANBUS_ID) ||
             (std_id == AMS_ECU_HEALTH_CANBUS_ID) ||
+            (std_id == AMS_ECU_CURRENT_DIAG_CANBUS_ID) ||
             (std_id == DER26_POWER_DCL_ID) ||
             (std_id == DER26_POWER_CCL_ID) ||
             (std_id == DER26_POWER_SOH_ID) ||
@@ -556,6 +611,11 @@ bool ams_parse_can_frame(ams_t *dev, uint32_t std_id, bool is_standard, uint8_t 
     if(std_id == AMS_ECU_HEALTH_CANBUS_ID)
     {
         return ams_parse_compact_health_frame(dev, data, dlc, now_ms);
+    }
+
+    if(std_id == AMS_ECU_CURRENT_DIAG_CANBUS_ID)
+    {
+        return ams_parse_current_diag_frame(dev, data, dlc, now_ms);
     }
 
     if((std_id == DER26_POWER_DCL_ID) ||

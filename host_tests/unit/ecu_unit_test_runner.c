@@ -503,6 +503,46 @@ static void test_compact_electrical_thermal_and_health_frames(void)
     EXPECT_EQ_U32(ams.rx_count, 3u);
 }
 
+static void test_current_source_diagnostic_frame_is_advisory(void)
+{
+    ams_t ams;
+    uint8_t diagnostic[8] = {1u, 2u, 1u, 5u, 0u, 9u, 0u, 7u};
+    ams_init(&ams);
+
+    EXPECT_TRUE(ams_is_known_can_id(AMS_ECU_CURRENT_DIAG_CANBUS_ID));
+    EXPECT_TRUE(ams_parse_can_frame(&ams,
+                                    AMS_ECU_CURRENT_DIAG_CANBUS_ID,
+                                    true,
+                                    8u,
+                                    diagnostic,
+                                    80u));
+    EXPECT_TRUE(ams.current_diag_valid);
+    EXPECT_TRUE(ams.current_diag_sane);
+    EXPECT_EQ_U8(ams.current_source, 1u);
+    EXPECT_EQ_U8(ams.current_quality, 2u);
+    EXPECT_EQ_U8(ams.current_source_epoch, 5u);
+    EXPECT_EQ_U16(ams.current_sample_sequence_low, 9u);
+    EXPECT_EQ_U16(ams.current_sample_age_ms, 7u);
+    EXPECT_EQ_U32(ams.current_physical_sample_tick, 73u);
+    EXPECT_EQ_U8(ams.current_boundary, 1u);
+
+    /* Malformed semantic content is retained for diagnostics but cannot
+     * become a source of torque authority. */
+    diagnostic[0] = 3u;
+    EXPECT_TRUE(ams_parse_can_frame(&ams,
+                                    AMS_ECU_CURRENT_DIAG_CANBUS_ID,
+                                    true,
+                                    8u,
+                                    diagnostic,
+                                    81u));
+    EXPECT_TRUE(ams.current_diag_valid);
+    EXPECT_FALSE(ams.current_diag_sane);
+
+    ams_invalidate_can_frame(&ams, AMS_ECU_CURRENT_DIAG_CANBUS_ID);
+    EXPECT_FALSE(ams.current_diag_valid);
+    EXPECT_FALSE(ams.current_diag_sane);
+}
+
 static void test_compact_pack_voltage_matches_cell_bounds(void)
 {
     ams_t ams;
@@ -888,6 +928,7 @@ int main(void)
     run_test("compact status frame sets torque gate fields", test_compact_status_frame_sets_torque_gate_fields);
     run_test("compact status fault flags block torque", test_compact_status_fault_flags_block_torque);
     run_test("compact electrical thermal and health frames", test_compact_electrical_thermal_and_health_frames);
+    run_test("current source diagnostic frame is advisory", test_current_source_diagnostic_frame_is_advisory);
     run_test("compact pack voltage matches cell bounds", test_compact_pack_voltage_matches_cell_bounds);
     run_test("compact status drives stale and sequence checks", test_compact_status_drives_stale_and_sequence_checks);
     run_test("compact summary freshness thermal and sanity gates", test_compact_summary_freshness_thermal_and_sanity_gates);

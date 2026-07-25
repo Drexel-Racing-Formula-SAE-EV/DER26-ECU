@@ -19,17 +19,24 @@
  */
 void acc_task_fn(void *arg);
 
+static StaticTask_t acc_task_tcb;
+static StackType_t acc_task_stack[ECU_STACK_ACC_WORDS];
+static TaskHandle_t acc_task_handle = NULL;
+
 TaskHandle_t acc_task_start(app_data_t *data)
 {
-    TaskHandle_t handle = NULL;
-
     if(data == NULL)
     {
         return NULL;
     }
 
-    xTaskCreate(acc_task_fn, "ACC task", 256, (void *)data, ACC_PRIO, &handle);
-    return handle;
+    if(acc_task_handle == NULL)
+    {
+        acc_task_handle = xTaskCreateStatic(acc_task_fn,
+            "ACC task", ECU_STACK_ACC_WORDS, (void *)data, ACC_PRIO,
+            acc_task_stack, &acc_task_tcb);
+    }
+    return acc_task_handle;
 }
 
 void acc_task_fn(void *arg)

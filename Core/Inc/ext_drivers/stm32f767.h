@@ -53,4 +53,11 @@ uint16_t stm32f767_adc_read(ADC_HandleTypeDef *hadc);
 HAL_StatusTypeDef stm32f767_adc_read_checked(ADC_HandleTypeDef *hadc, uint16_t *count);
 HAL_StatusTypeDef stm32f767_adc_switch_channel(ADC_HandleTypeDef *hadc, uint32_t channel);
 
+/* Cortex-M7 DWT cycle counter used for target-only WCET evidence. The counter
+ * is free-running and wraps naturally at 32 bits. */
+bool stm32f767_cycle_counter_init(void);
+bool stm32f767_cycle_counter_available(void);
+uint32_t stm32f767_cycle_counter_read(void);
+uint32_t stm32f767_cycles_to_us(uint32_t cycles);
+
 #endif

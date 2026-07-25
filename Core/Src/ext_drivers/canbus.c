@@ -28,6 +28,7 @@ static HAL_StatusTypeDef canbus_configure_rx_filters(CAN_HandleTypeDef *hcan)
         AMS_ECU_ELECTRICAL_CANBUS_ID,
         AMS_ECU_THERMAL_CANBUS_ID,
         AMS_ECU_HEALTH_CANBUS_ID,
+        AMS_ECU_CURRENT_DIAG_CANBUS_ID,
         DER26_POWER_DCL_ID,
         DER26_POWER_CCL_ID,
         DER26_POWER_SOH_ID,
@@ -48,7 +49,6 @@ static HAL_StatusTypeDef canbus_configure_rx_filters(CAN_HandleTypeDef *hcan)
         /* Explicit safe duplicates fill all otherwise-unused list slots.
          * Do not rely on implicit zero initialization: that would program
          * acceptance filters for standard ID 0x000. */
-        CM200_FAULTS_CAN_ID,
         DER26_POWER_DCL_ID,
         AMS_ECU_STATUS_CANBUS_ID,
         CM200_INTERNAL_STATES_CAN_ID,
@@ -102,7 +102,9 @@ void canbus_device_init(canbus_t *dev, CAN_HandleTypeDef *hcan, CAN_TxHeaderType
     dev->rx_remote_count = 0u;
     dev->filters_configured = false;
     dev->started = false;
-    dev->tx_queue = xQueueCreate(CANBUS_TX_QUEUE_LENGTH, sizeof(canbus_packet_t));
+    dev->tx_queue = xQueueCreateStatic(CANBUS_TX_QUEUE_LENGTH,
+        sizeof(canbus_tx_request_t), dev->tx_queue_storage,
+        &dev->tx_queue_control);
 
     dev->tx_header->IDE = CAN_ID_STD;
     dev->tx_header->StdId = 0x00;
@@ -117,9 +119,9 @@ void canbus_device_init(canbus_t *dev, CAN_HandleTypeDef *hcan, CAN_TxHeaderType
                     (HAL_CAN_Start(hcan) == HAL_OK));
 }
 
-HAL_StatusTypeDef canbus_queue_tx(canbus_t *dev, const canbus_packet_t *packet)
+HAL_StatusTypeDef canbus_queue_tx(canbus_t *dev, const canbus_tx_request_t *request)
 {
-    if((dev == NULL) || (packet == NULL) || (dev->tx_queue == NULL))
+    if((dev == NULL) || (request == NULL) || (dev->tx_queue == NULL))
     {
         return HAL_ERROR;
     }
@@ -131,7 +133,7 @@ HAL_StatusTypeDef canbus_queue_tx(canbus_t *dev, const canbus_packet_t *packet)
 
     /* This is a latest-value mailbox, not a FIFO.  A newer disable request
      * must replace an older positive-torque command that has not been sent. */
-    if(xQueueOverwrite(dev->tx_queue, packet) != pdPASS)
+    if(xQueueOverwrite(dev->tx_queue, request) != pdPASS)
     {
         dev->tx_dropped_count++;
         return HAL_BUSY;

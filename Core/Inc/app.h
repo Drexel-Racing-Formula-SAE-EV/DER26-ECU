@@ -20,10 +20,13 @@
 #include "ecu_config.h"
 #include "ext_drivers/rtc.h"
 #include "ext_drivers/ecu_safety.h"
+#include "power/ecu_current_residual_monitor.h"
+#include "power/ecu_pack_current_model.h"
+#include "power/ecu_torque_clamp.h"
 
 #define VER_MAJOR 2
-#define VER_MINOR 5
-#define VER_BUG   1
+#define VER_MINOR 6
+#define VER_BUG   2
 
 #define PLAUSIBILITY_THRESH 10
 #define BRAKE_LIGHT_THRESH 5
@@ -35,13 +38,25 @@
 
 #define ERR_FREQ 100
 #define APPS_FREQ 100
-#define BSE_FREQ 20
+#define BSE_FREQ 100
 #define BPPC_FREQ 20
 #define CLI_FREQ 5
 #define ACC_FREQ 5
 #define DASH_FREQ 5
 #define COOL_FREQ 5
 #define RTD_FREQ 50
+
+/* Static task stack budgets, in 32-bit StackType_t words on Cortex-M7. */
+#define ECU_STACK_ERROR_WORDS      256u
+#define ECU_STACK_RTD_WORDS        256u
+#define ECU_STACK_CAN_WORDS        768u
+#define ECU_STACK_APPS_WORDS       768u
+#define ECU_STACK_BPPC_WORDS       256u
+#define ECU_STACK_BSE_WORDS        256u
+#define ECU_STACK_CLI_WORDS       1024u
+#define ECU_STACK_ACC_WORDS        256u
+#define ECU_STACK_DASH_WORDS       256u
+#define ECU_STACK_COOL_WORDS       256u
 
 #define ERR_PRIO 17
 #define RTD_PRIO 15
@@ -105,6 +120,26 @@ typedef struct {
 	volatile uint8_t cm200_rolling_counter;
 	volatile int16_t cm200_target_torque_0p1nm;
 	volatile int16_t cm200_command_torque_0p1nm;
+	volatile uint8_t torque_clamp_reason;
+	volatile uint16_t torque_clamp_steady_calls;
+	volatile uint16_t torque_clamp_transition_calls;
+	volatile uint16_t torque_clamp_cells_evaluated;
+	volatile uint32_t torque_clamp_deadline_overrun_count;
+	volatile uint32_t torque_clamp_consecutive_overruns;
+	volatile bool torque_clamp_overrun_fault;
+	volatile bool torque_clamp_output_valid;
+	volatile bool current_model_residual_fault;
+	volatile uint8_t battery_authority_state;
+	volatile uint32_t current_residual_violation_count;
+	volatile uint32_t current_source_epoch;
+	volatile uint32_t current_measurement_sequence;
+	volatile uint32_t torque_clamp_last_cycles;
+	volatile uint32_t torque_clamp_max_cycles;
+	volatile uint32_t torque_clamp_soft_overrun_count;
+	ecu_pack_current_calibration_runtime_t pack_current_calibration_runtime;
+	ecu_torque_clamp_state_t torque_clamp_state;
+	ecu_current_residual_monitor_t current_residual_monitor;
+	ecu_current_prediction_snapshot_t current_prediction;
 	volatile int16_t ams_cm200_voltage_delta_0p1v;
 	volatile bool ams_cm200_voltage_crosscheck_valid;
 	volatile bool ams_cm200_voltage_mismatch;

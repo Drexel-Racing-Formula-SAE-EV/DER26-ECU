@@ -59,6 +59,14 @@ jobs:
       - name: Run ECU host regression tests
         working-directory: host_tests
         run: make CC=gcc test | tee host_test_output.txt
+      - name: Run torque/current model, Revision 7 invariants, availability, residual monitor, and Python differential tests
+        working-directory: host_tests
+        run: |
+          make CC=gcc torque-clamp | tee torque_clamp_output.txt
+          make CC=gcc rev7-invariants | tee rev7_invariant_output.txt
+          make CC=gcc bundle-availability | tee bundle_availability_output.txt
+          make CC=gcc residual-monitor | tee residual_monitor_output.txt
+          make CC=gcc current-model-differential | tee current_model_differential_output.txt
       - name: Run AMS power-protocol conformance, producer golden vectors, and ECU integration tests
         working-directory: host_tests
         run: |
@@ -71,10 +79,14 @@ jobs:
       - name: Run extended deterministic fault-injection stress
         working-directory: host_tests
         run: make CC=gcc stress
-      - name: Verify build-profile safety gates
+      - name: Verify build-profile, static-allocation, and residual-authority gates
         working-directory: host_tests
-        run: make CC=gcc profile-gates
-      - name: Type-check bench application and verify vehicle implementation lock
+        run: |
+          make CC=gcc profile-gates
+          make CC=gcc static-allocation-gate
+          make CC=gcc residual-authority-gate
+          make CC=gcc current-model-evidence-gate
+      - name: Type-check application and verify vehicle evidence locks
         run: bash ci/scripts/check_core_host_syntax.sh
       - name: Run ECU sanitizer tests
         working-directory: host_tests
@@ -97,6 +109,16 @@ jobs:
           test -f unit_test_output.txt && cat unit_test_output.txt || true
           echo "===== host_test_output.txt ====="
           test -f host_test_output.txt && cat host_test_output.txt || true
+          echo "===== torque_clamp_output.txt ====="
+          test -f torque_clamp_output.txt && cat torque_clamp_output.txt || true
+          echo "===== rev7_invariant_output.txt ====="
+          test -f rev7_invariant_output.txt && cat rev7_invariant_output.txt || true
+          echo "===== bundle_availability_output.txt ====="
+          test -f bundle_availability_output.txt && cat bundle_availability_output.txt || true
+          echo "===== residual_monitor_output.txt ====="
+          test -f residual_monitor_output.txt && cat residual_monitor_output.txt || true
+          echo "===== current_model_differential_output.txt ====="
+          test -f current_model_differential_output.txt && cat current_model_differential_output.txt || true
           echo "===== power_consumer_output.txt ====="
           test -f power_consumer_output.txt && cat power_consumer_output.txt || true
           echo "===== power_integration_output.txt ====="

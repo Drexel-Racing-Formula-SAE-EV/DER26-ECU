@@ -261,6 +261,59 @@ int main(void)
     CHECK(envelope.charge_limiting_segment
           [DER26_POWER_HORIZON_30_S] == 0x0Fu);
 
+    /* Same-counter advisory frames may arrive before the final core frame.
+     * Order within the bounded skew window must not change their meaning. */
+    der26_power_consumer_init(&consumer);
+    make_bundle(1u, payload, valid_flags, valid_flags);
+    ingest_bundle(&consumer, payload, 3000u);
+    make_strategy(2u, advisory);
+    CHECK(der26_power_consumer_ingest(&consumer, DER26_POWER_STRATEGY_ID,
+                                      false, false, 8u, advisory, 3010u));
+    make_bindings(2u, advisory);
+    CHECK(der26_power_consumer_ingest(&consumer, DER26_POWER_BINDINGS_ID,
+                                      false, false, 8u, advisory, 3011u));
+    make_bundle(2u, payload, valid_flags, valid_flags);
+    ingest_bundle(&consumer, payload, 3015u);
+    CHECK(der26_power_consumer_get_resource_state(&consumer, 3019u,
+                                                  &resource));
+    CHECK(der26_power_consumer_get_feasibility_envelope(&consumer, 3019u,
+                                                        &envelope));
+    CHECK(envelope.binding_metadata_valid);
+
+    /* The same order-independent rule must survive the 32-bit tick wrap. */
+    der26_power_consumer_init(&consumer);
+    make_bundle(1u, payload, valid_flags, valid_flags);
+    ingest_bundle(&consumer, payload, UINT32_MAX - 200u);
+    make_strategy(2u, advisory);
+    CHECK(der26_power_consumer_ingest(&consumer, DER26_POWER_STRATEGY_ID,
+                                      false, false, 8u, advisory,
+                                      UINT32_MAX - 4u));
+    make_bindings(2u, advisory);
+    CHECK(der26_power_consumer_ingest(&consumer, DER26_POWER_BINDINGS_ID,
+                                      false, false, 8u, advisory,
+                                      UINT32_MAX - 3u));
+    make_bundle(2u, payload, valid_flags, valid_flags);
+    ingest_bundle(&consumer, payload, UINT32_MAX - 2u);
+    CHECK(der26_power_consumer_get_resource_state(&consumer, 2u,
+                                                  &resource));
+    CHECK(der26_power_consumer_get_feasibility_envelope(&consumer, 2u,
+                                                        &envelope));
+    CHECK(envelope.binding_metadata_valid);
+
+    /* Restore the normal consumer state used by the remaining corruption and
+     * staleness cases below. */
+    der26_power_consumer_init(&consumer);
+    make_bundle(1u, payload, valid_flags, valid_flags);
+    ingest_bundle(&consumer, payload, 100u);
+    make_bundle(2u, payload, valid_flags, valid_flags);
+    ingest_bundle(&consumer, payload, 200u);
+    make_strategy(2u, advisory);
+    CHECK(der26_power_consumer_ingest(&consumer, DER26_POWER_STRATEGY_ID,
+                                      false, false, 8u, advisory, 205u));
+    make_bindings(2u, advisory);
+    CHECK(der26_power_consumer_ingest(&consumer, DER26_POWER_BINDINGS_ID,
+                                      false, false, 8u, advisory, 206u));
+
     /* A bad optional frame cannot revoke valid scalar authority. */
     make_strategy(2u, advisory);
     advisory[2] ^= 0x01u;

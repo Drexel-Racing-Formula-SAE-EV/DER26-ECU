@@ -72,4 +72,4 @@ ECU_CM200_CAN_CONTRACT_VALIDATED=1
 ECU_AMS_POWER_CLAMP_VALIDATED=1
 ```
 
-after the interface schematic is reviewed, assembled, electrically measured, fault-injected, and documented; after the independent CM200 contract is validated; and after the conservative low-speed/stall-safe AMS DCL/CCL torque clamp is implemented and validated. The source-owned `ECU_AMS_POWER_CLAMP_IMPLEMENTED` latch must also be changed by the implementation commit; it cannot be supplied from build flags. These acknowledgements are build interlocks, not automated proof.
+after the interface schematic is reviewed, assembled, electrically measured, fault-injected, and documented; after the independent CM200 contract is validated; and after the implemented conservative low-speed/stall-safe AMS DCL/CCL torque clamp is calibrated and validated. The source-owned `ECU_AMS_POWER_CLAMP_IMPLEMENTED` latch is already enabled by v2.6.1 and cannot be supplied from build flags. These acknowledgements are build interlocks, not automated proof.

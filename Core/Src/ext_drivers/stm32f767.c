@@ -12,48 +12,87 @@
 #include "main.h"
 #include "ext_drivers/stm32f767.h"
 #include "ext_drivers/canbus.h"
+#include "semphr.h"
+
+static StaticSemaphore_t can1_mutex_cb;
+static StaticSemaphore_t adc3_mutex_cb;
+static StaticSemaphore_t i2c2_mutex_cb;
+static StaticSemaphore_t spi6_mutex_cb;
+static StaticSemaphore_t uart3_mutex_cb;
+static StaticSemaphore_t uart7_mutex_cb;
+static bool dwt_cycle_counter_available = false;
 
 const osMutexAttr_t can1_mutex_attr = {
 	.name = "CAN Bus Mutex",
 	.attr_bits = osMutexPrioInherit | osMutexRecursive,
-	.cb_mem = NULL,
-	.cb_size = 0UL,
+	.cb_mem = &can1_mutex_cb,
+	.cb_size = sizeof(can1_mutex_cb),
 };
 
 const osMutexAttr_t adc3_mutex_attr = {
 	.name = "ADC3 Mutex",
 	.attr_bits = osMutexPrioInherit | osMutexRecursive,
-	.cb_mem = NULL,
-	.cb_size = 0UL,
+	.cb_mem = &adc3_mutex_cb,
+	.cb_size = sizeof(adc3_mutex_cb),
 };
 
 const osMutexAttr_t i2c2_mutex_attr = {
 	.name = "MPU6050 Mutex",
 	.attr_bits = osMutexPrioInherit | osMutexRecursive,
-	.cb_mem = NULL,
-	.cb_size = 0UL,
+	.cb_mem = &i2c2_mutex_cb,
+	.cb_size = sizeof(i2c2_mutex_cb),
 };
 
 const osMutexAttr_t spi6_mutex_attr = {
 	.name = "SD Card Mutex",
 	.attr_bits = osMutexPrioInherit | osMutexRecursive,
-	.cb_mem = NULL,
-	.cb_size = 0UL,
+	.cb_mem = &spi6_mutex_cb,
+	.cb_size = sizeof(spi6_mutex_cb),
 };
 
 const osMutexAttr_t uart3_mutex_attr = {
 	.name = "CLI Mutex",
 	.attr_bits = osMutexPrioInherit | osMutexRecursive,
-	.cb_mem = NULL,
-	.cb_size = 0UL,
+	.cb_mem = &uart3_mutex_cb,
+	.cb_size = sizeof(uart3_mutex_cb),
 };
 
 const osMutexAttr_t uart7_mutex_attr = {
 	.name = "Dashboard Mutex",
 	.attr_bits = osMutexPrioInherit | osMutexRecursive,
-	.cb_mem = NULL,
-	.cb_size = 0UL,
+	.cb_mem = &uart7_mutex_cb,
+	.cb_size = sizeof(uart7_mutex_cb),
 };
+
+bool stm32f767_cycle_counter_init(void)
+{
+    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+    DWT->CYCCNT = 0u;
+    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+    dwt_cycle_counter_available = ((DWT->CTRL & DWT_CTRL_CYCCNTENA_Msk) != 0u);
+    return dwt_cycle_counter_available;
+}
+
+bool stm32f767_cycle_counter_available(void)
+{
+    return dwt_cycle_counter_available;
+}
+
+uint32_t stm32f767_cycle_counter_read(void)
+{
+    return dwt_cycle_counter_available ? DWT->CYCCNT : 0u;
+}
+
+uint32_t stm32f767_cycles_to_us(uint32_t cycles)
+{
+    if((!dwt_cycle_counter_available) || (SystemCoreClock == 0u))
+    {
+        return 0u;
+    }
+
+    return (uint32_t)(((uint64_t)cycles * 1000000ull) /
+                      (uint64_t)SystemCoreClock);
+}
 
 void stm32f767_init(stm32f767_t *dev)
 {
@@ -105,6 +144,8 @@ void stm32f767_init(stm32f767_t *dev)
 	dev->uart3_mutex = osMutexNew(&uart3_mutex_attr);
 
 	dev->uart7_mutex = osMutexNew(&uart7_mutex_attr);
+
+	(void)stm32f767_cycle_counter_init();
 
 	dev->initialized = ((dev->can1_mutex != NULL) &&
 	                    (dev->adc3_mutex != NULL) &&

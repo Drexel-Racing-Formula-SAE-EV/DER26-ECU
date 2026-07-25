@@ -1,128 +1,145 @@
-# DER26 ECU Firmware v2.5.1
+# DER26 ECU Firmware v2.6.3
 
-STM32F767ZI / FreeRTOS firmware for the DER26 vehicle ECU. Version 2.5.1 aligns the ECU with AMS v0.3.4 power protocol v2, corrects the 120-temperature legacy mapping, makes the final AMS authority check direction-aware, and preserves the output-inhibited default while the numeric torque-to-DC-current clamp remains unimplemented.
+STM32F767ZI / FreeRTOS firmware for the DER26 vehicle ECU.
 
-## Build locks
+Version 2.6.3 closes the Revision 7 audit items on top of the v2.6.2 target-hardening release. A latched pack-current residual now has an explicit protected-commit reason and, because no independently calibrated degraded torque cap exists, deterministically forces zero/disable. The independent Revision 7 invariant probe and measured power-bundle availability probe are permanent CI gates, with explicit 10 Hz outage budgets and a counter-wrap/staleness compile-time guard. The ECU remains independent of whether the AMS canonical current source is DHAB or APM.
 
-Debug, Release, and headless builds default to the bench profile:
+Version 2.6.2 converted all application RTOS objects to static allocation, fixed residual persistence so it advances only on distinct AMS physical samples, added physical-sample metadata support, replaced APPS/brake sample counters with elapsed-time checks, instrumented clamp WCET with the Cortex-M7 DWT counter, and expanded the vehicle release gates.
+
+**This is implemented software, not a released vehicle calibration.** The checked-in current-model artifact is deliberately invalid, current-measurement uncertainty remains provisional, cooling remains unvalidated, and all vehicle evidence gates default to `0`. The normal repository configuration cannot grant vehicle torque.
+
+## Release locks
+
+Bench builds use:
 
 ```text
 ECU_BUILD_PROFILE=0
 ```
 
-It runs sensing, CAN decoding, command generation, CLI, and safety logic, but holds `Firmware_Ok`, `MTR_EN`, `Cascadia_ON`, and enabled/nonzero torque commands inhibited.
+They run sensing, CAN parsing, candidate generation, the clamp, diagnostics, and host-testable safety logic while keeping `Firmware_Ok`, `MTR_EN`, `Cascadia_ON`, and enabled/nonzero torque inhibited.
 
-A future vehicle build requires the profile plus all external evidence acknowledgements:
+A vehicle build requires the three top-level contract acknowledgements plus independent evidence for the pin map, APPS, brake sensing, discrete inputs, AMS protocol, current model, residual monitor, cooling, RTOS memory, WCET, CAN load, watchdog, and safe outputs. All gates default to zero.
 
 ```text
 ECU_BUILD_PROFILE=1
 ECU_BSPD_INTERFACE_3V3_VALIDATED=1
 ECU_CM200_CAN_CONTRACT_VALIDATED=1
 ECU_AMS_POWER_CLAMP_VALIDATED=1
+ECU_PINMAP_VALIDATED=1
+ECU_APPS_CALIBRATION_VALIDATED=1
+ECU_BSE_CALIBRATION_VALIDATED=1
+ECU_DISCRETE_INPUTS_VALIDATED=1
+ECU_AMS_PROTOCOL_VALIDATED=1
+ECU_CURRENT_MODEL_VALIDATED=1
+ECU_CURRENT_RESIDUAL_VALIDATED=1
+ECU_COOLING_VALIDATED=1
+ECU_RTOS_MEMORY_VALIDATED=1
+ECU_WCET_VALIDATED=1
+ECU_CAN_LOAD_VALIDATED=1
+ECU_WATCHDOG_VALIDATED=1
+ECU_SAFE_OUTPUTS_VALIDATED=1
 ```
 
-It additionally requires the source-owned `ECU_AMS_POWER_CLAMP_IMPLEMENTED` latch to be changed from `0` to `1` by the implementation commit. That latch cannot be supplied through compiler flags, so the vehicle profile is intentionally unbuildable in v2.5.1. The BPSD board exports a nominal 12 V active-high `BSPD Ok` signal, while PE13 is a 3.3 V input with no shown level conversion. Never connect that output directly to PE13. The CM200 acknowledgement requires measured IDs, rates, command mode, rolling-counter behavior, and required broadcasts. These symbols are locks, not proof of hardware validation.
+The source-owned implementation latch is now:
 
-## Safety behavior
+```text
+ECU_AMS_POWER_CLAMP_IMPLEMENTED=1
+```
 
-- Critical outputs initialize low and are forced low by HAL fatal errors, CPU exceptions, RTOS assertion/allocation/stack failures, and watchdog reset.
-- The error supervisor is the only runtime owner of `Firmware_Ok`, `MTR_EN`, and `Cascadia_ON`.
-- Vehicle builds use an independent watchdog; APPS, BSE, BPPC, RTD, CAN, and cooling task heartbeats are supervised.
-- BMS, IMD, BPSD, motor-fault, TSAL, and motor-OK signals fail closed. Fault assertion is immediate; the principal discrete fault inputs require 250 ms of healthy samples to recover.
-- RTD requires TS active, brake applied, healthy controller/safety state, one observed button release, and a new deliberate button press. An early/held press is consumed. The momentary button may be released during the 2 s sound and is not required to remain held after RTD.
-- Any RTD gate loss disables torque and requires a new release/press cycle; it cannot automatically re-enter RTD from a held button.
-- CLI was moved below safety-control priorities so blocking UART diagnostics cannot starve RTD, CAN, APPS, BSE, or the error supervisor.
+That only states that the source path exists and passes software contract tests. It does not replace calibration, target timing, HIL, dyno, or vehicle evidence.
+
+The BSPD board exports a nominal 12 V active-high `BSPD Ok` signal, while PE13 is a 3.3 V MCU input with no shown level conversion. Never connect that output directly to PE13. The CM200 acknowledgement also remains dependent on measured EEPROM/CAN configuration and timeout behavior.
+
+## Torque-to-pack-current architecture
+
+The APPS task runs at 100 Hz and produces a bounded torque-command contract. It does not update physical command state. The CAN task waits for a free hardware mailbox, takes the newest coherent AMS/CM200 snapshot, performs comparison-only re-verification using cached current intervals, builds the final CM200 packet, and updates clamp state only after `HAL_CAN_AddTxMessage()` accepts the packet.
+
+The implementation includes:
+
+- positive pack current = accumulator discharge;
+- exact zero/DCL/CCL comparisons with numerical uncertainty applied by outward interval widening;
+- source-independent AMS DCL, CCL, direction authorization, and canonical measured current;
+- raw torque separated from zero/sign classification;
+- zero-band hysteresis and persistent last-nonzero sign;
+- physical-zero confirmation before opposite-sign torque;
+- whole-cell-aligned increase search using constant certified cell bounds;
+- bounded reduction search toward zero;
+- separate absolute transition envelopes indexed by command profile, direction, full active raw span, speed, Vdc, and temperature region;
+- bounded transition refinement for optional increases;
+- settled tracking, microstep margin, anchor-deviation guard, cumulative-drift guard, settling time, and re-anchoring;
+- asymmetric age-derived speed uncertainty for acceleration and deceleration/regrip;
+- union across all touched torque and operating regions with fail-closed region caps;
+- one provisional healthy-R2D auxiliary interval `[0, 0.250 A]`, applied once;
+- battery-authority states including `LOW`, `TORQUE_EXHAUSTED`, and `ZERO_STEADY_AUX_INFEASIBLE`;
+- execution-count bounds tied to the accepted 21-point/20-cell schema;
+- no model call or search in the final protected mailbox commit;
+- late authority/capability/operating-point changes producing zero;
+- aggregate DHAB/APM residual monitoring with source-epoch handling.
+
+See [Torque-to-pack-current clamp](Core/docs/ECU_TORQUE_TO_PACK_CURRENT_CLAMP.md) and [Certification campaign](Core/docs/ECU_CURRENT_MODEL_CERTIFICATION_CAMPAIGN.md).
 
 ## AMS supervision
 
-Torque authorization requires independently fresh `0x680`, `0x681`, and `0x682` health frames, coherent status sequence, matching protocol version, BMS_OK/validity flags, zero relevant faults, and sane electrical/thermal values. It also requires a fresh, atomic two-good-bundle protocol-v2 authority from `0x684-0x687`. Positive torque uses discharge authority; negative torque uses charge/regen authority. A malformed required frame invalidates its last good value immediately, while malformed optional `0x689`/`0x68A` metadata cannot revoke scalar authority. Producer-generated AMS v0.3.4 golden vectors are kept in host CI to lock byte order, scales, CRC, horizon selection, and optional metadata decoding.
+Torque authorization requires independently fresh compact status/electrical/thermal/health data and a fresh coherent protocol-v2 authority bundle. Partial advisory updates may only tighten authority and do not refresh coherent freshness. The consumer uses the proven 4-bit ordering rule only inside its timing trust window.
 
-Electrical summaries enforce cell, pack-current, and pack-voltage plausibility bounds, including a 75-series consistency check requiring the reported pack voltage to lie between `75 * min_cell` and `75 * max_cell` within a 200 mV encoding tolerance. Thermal summaries enforce -40 to 150 C bounds, `min <= average <= max`, and fan command no greater than 100%. Legacy `0x069` now matches the current 75-cell/120-temperature/10-fan packet map and remains diagnostic-only; `0x421` remains raw estimator diagnostics. See [ECU/AMS CAN contract](Core/docs/ECU_AMS_CAN_CONTRACT.md).
+The ECU does not branch on DHAB versus APM. Source identity is diagnostic only; equivalent canonical AMS data must produce identical clamp behavior. Live AMS v0.3.5 producer/ECU consumer compatibility is covered by `make power-source-compat`. The source diagnostic frame is advisory only and cannot change the clamp equations or grant authority.
 
 ## CM200 supervision
 
-The ECU decodes temperatures, speed/position, currents, voltages, internal states, POST/RUN faults, torque/timer, firmware identity, and torque capability from `0x0A0` through `0x0B1`.
+Required feedback frames remain `0x0A5`, `0x0A7`, `0x0AA`, `0x0AB`, `0x0AC`, and `0x0B1`, each with a 250 ms software timeout. Torque also requires CAN torque mode, no enable lockout, no POST/RUN fault, progressing counter/timer integrity, VSM Ready or Motor Running, and fresh torque capability.
 
-Required torque feedback is:
+A one-slot latest-value queue prevents an unsent old positive command from surviving a newer disable request. The actual hardware-mailbox commit is the state-transition point used by the clamp.
 
-```text
-0x0A5  0x0A7  0x0AA  0x0AB  0x0AC  0x0B1
-```
+## Residual monitoring
 
-Each required frame has a 250 ms timeout. Torque also requires:
+The runtime monitor compares time-aligned canonical AMS pack current against the interval published for the torque actually accepted by bxCAN. It distinguishes step transition, slew tracking, settling, and steady phases. Stale/invalid current samples count as violations. Source-epoch changes reset persistence and enter bounded source settling without clearing a latched fault.
 
-- CAN torque mode and no enable lockout;
-- zero POST and RUN fault words;
-- correlated and progressing inverter expected counter;
-- current/previous command echo agreement;
-- advancing power-on timer with reset/replay detection;
-- VSM Ready or Motor Running state and forward direction;
-- fresh positive motoring capability.
+AMS frame `0x68B` now carries source, quality, boundary, source epoch, sample sequence, and physical sample age. The ECU reconstructs the physical sample tick and advances residual persistence only when the source sample sequence changes. If a system has never advertised `0x68B`, the legacy electrical-frame timestamp remains a compatibility fallback; after `0x68B` is observed, stale or incoherent metadata invalidates the residual measurement. Automatic mid-run source failover remains prohibited.
 
-CM200 commands now run at 100 Hz. Positive torque is limited by the `0x0B1` capability and calibrated 200 Nm ceiling, with a positive-torque slew limiter. Every fault or inhibit bypasses the down-slew and sends immediate zero/disable. The one-slot transmit mailbox replaces an unsent old request, eliminating FIFO delivery of stale positive torque after a newer disable. After any hardware-mailbox wait, the CAN task samples the newest AMS/CM200 state and commits the selected command to bxCAN while CAN RX is masked; a newer authority zero accepted before that commit point cannot be bypassed.
+Because auxiliary current is not independently measured, violations are classified as total pack-current envelope violations rather than automatically as inverter-model failures.
 
-The controller is powered in stages so feedback can start without creating a shutdown/precharge deadlock. Communication health permits `Firmware_OK`; VSM Ready/Running remains mandatory for RTD and torque. Missing startup feedback and runtime feedback/integrity failures are reset-required latches. Details and the EEPROM/test contract are in [CM200 CAN contract and bring-up](Core/docs/CM200_CAN_CONTRACT_AND_BRINGUP.md).
+The CLI `power` command reports clamp reason, authority state, path/sign/phase, model-call counts, predicted interval, residual status, source epoch, calibration qualification, and deadline overruns.
 
-## CAN hardening
+## Validation commands
 
-- bxCAN hardware list filters admit only the supported AMS and CM200 standard data IDs; `canbus_device_init()` is the single filter owner before CAN start.
-- Remote frames are rejected again in software.
-- The RX ISR drains a bounded batch instead of one frame per callback.
-- Valid, ignored, malformed, remote, FIFO-overrun, recovery, replaced-command, and dropped-command counts are retained.
-- Protocol-specific invalidation prevents one valid subsystem frame from clearing another subsystem's malformed/stale state.
-- Command counters advance only after HAL accepts the frame.
-
-## Diagnostics
-
-Useful UART commands:
-
-```text
-ver
-status
-fault
-sd
-bspd
-ams
-can
-cm200
-tasks
-throttle
-brake
-brakelight
-```
-
-`ver` prints all build locks. `cm200` reports freshness, states, integrity, fault words, torque capability, firmware identity, temperatures, and a diagnostic AMS-pack/DC-bus voltage comparison. `tasks` reports stack high-water marks.
-
-## Build and validation
-
-Host validation:
+From `host_tests/`:
 
 ```bash
-cd host_tests
-make CC=gcc clean
-make CC=gcc ci
-make CC=gcc asan
-make CC=gcc ubsan
-make CC=gcc stress
-make CC=gcc CLANG=clang clang-analyze
+make CC=clang clean
+make CC=clang CLANG=clang clang-ci
+make CC=clang asan
+make CC=clang ubsan
+make CC=clang stress
+make CC=clang power-source-compat AMS_ROOT=/path/to/DER26-AMS/AMS
 ```
 
-Bench ARM build:
+The current-model-specific targets are:
 
 ```bash
-ECU_BUILD_PROFILE=0 bash ci/stm32/build_ecu_headless_gcc.sh
+make CC=clang torque-clamp
+make CC=clang residual-monitor
+make CC=clang elapsed-timer
+make CC=clang current-model-differential
 ```
 
-Vehicle ARM build, only after the BSPD/CM200 contracts and the implemented numeric AMS clamp are closed:
+Full application host syntax checking:
 
 ```bash
-ECU_BUILD_PROFILE=1 \
-ECU_BSPD_INTERFACE_3V3_VALIDATED=1 \
-ECU_CM200_CAN_CONTRACT_VALIDATED=1 \
-ECU_AMS_POWER_CLAMP_VALIDATED=1 \
-bash ci/stm32/build_ecu_headless_gcc.sh
+CC=clang bash ci/scripts/check_core_host_syntax.sh
 ```
 
-This revision environment does not provide `arm-none-eabi-gcc`, so a clean team-toolchain target build, map review, flash, and staged hardware validation remain mandatory. Follow [ECU hardware bring-up](Core/docs/ECU_HARDWARE_BRINGUP.md) and [BPSD interface test plan](Core/docs/BSPD_INTERFACE_AND_TEST_PLAN.md).
+Team CI may run the same portable suites with GCC and performs a bench ARM-GCC build. The local completion environment used for this release did not provide or attempt a GCC/ARM target build.
 
-Coolant temperature conversion and protection thresholds remain uncalibrated. The firmware reports that telemetry invalid and commands the cooling pump to 100% rather than presenting sensor voltage as temperature.
+## Deliberate release blockers
+
+The following remain open and keep `ECU_AMS_POWER_CLAMP_VALIDATED=0`:
+
+- certified steady whole-cell current bounds;
+- low-speed/stall and four-quadrant characterization;
+- certified transition and composed-sequence envelopes;
+- certified microstep margin and settling times;
+- final auxiliary-current and DHAB/APM return-path boundary evidence;
+- target STM32F767 WCET, stack, ISR-interference, and map measurements;
+- CM200 timeout/EEPROM verification;
+- HIL, dyno, holdout, and restricted vehicle testing;
+- APM-primary validation and formal DHAB-removal decision.

@@ -1,41 +1,61 @@
 # ECU Host Tests
 
-These suites exercise pure ECU safety/parser logic without STM32 hardware. They do not prove pin levels, interrupt timing, physical CAN behavior, target ABI, or controller configuration.
+These suites exercise portable ECU parser, safety, current-model, clamp, and residual-monitor logic without STM32 hardware. They do not prove pin levels, interrupt timing, target ABI, CM200 EEPROM configuration, physical CAN behavior, or vehicle calibration.
 
-Current coverage includes:
+## Main coverage
 
-- legacy AMS bounds/layout/tail parsing for all 75 cells, temperature groups, and fans;
-- compact AMS `0x680-0x683` decoding, protocol/sequence/freshness/fault gates, physical plausibility, and immediate invalidation of malformed required frames;
-- CM200 little-endian decoding for all supported broadcasts;
-- CM200 required-frame freshness, command-counter acquisition/progression/mismatch, torque echo, timer progression/reset, fault words, VSM torque readiness, and capability clamp;
-- split CM200 feedback-health versus torque-ready behavior through precharge;
-- CM200 startup grace, runtime loss, immediate fault, latching, and timer-wrap policy;
-- signed command encoding, direction-preserving disable, rolling counter, unlock sequence, packet inspection, and torque slew limiting;
-- RTD release-before-arm, early/stuck press rejection, momentary-button behavior, sound timing, fault exit, rearm, and tick wrap;
-- BPSD active-high healthy semantics and delayed healthy recovery;
-- complete torque-gate fault matrix and task-heartbeat wrap behavior;
-- deterministic AMS fault/sequence fuzz and extended stress runs;
-- bench/vehicle compile locks for both BPSD and CM200 acknowledgements;
-- GCC static analysis and ASan/UBSan for every host suite.
+- legacy and compact AMS decoding, freshness, sequence, physical plausibility, and immediate invalidation;
+- protocol-v2 coherent DCL/CCL bundle and advisory handling;
+- live AMS v0.3.6 producer-to-ECU-consumer compatibility;
+- CM200 feedback decoding, freshness, counter/echo/timer integrity, capability, and fault gating;
+- RTD, BSPD, heartbeat, torque-gate, and deterministic fault-injection SIL;
+- torque/current schema and boot qualification;
+- direct whole-cell path enumeration;
+- input-age uncertainty and region-overflow behavior;
+- zero hysteresis, sign history, reversal-through-zero prevention;
+- full-span transition lookup and transition refinement;
+- settled tracking, microstep margin, cumulative drift, settling, and re-anchor;
+- battery-authority classification;
+- comparison-only final commit verification;
+- execution-count bounds tied to the maximum accepted schema;
+- aggregate current residual monitoring and source-epoch transitions;
+- independent Python/C current-model vectors;
+- 20,000 randomized clamp contract iterations and extended 50,000-cycle SIL stress;
+- ASan, UBSan, Clang static analysis, and build-profile gates.
 
-Run from `host_tests/`:
+## Recommended local commands
+
+From `host_tests/`:
 
 ```sh
-make CC=gcc clean
-make CC=gcc unit
-make CC=gcc test
-make CC=gcc system-sil
-make CC=gcc profile-gates
-make CC=gcc analyze
-make CC=gcc asan
-make CC=gcc ubsan
-make CC=gcc stress
+make CC=clang clean
+make CC=clang CLANG=clang clang-ci
+make CC=clang asan
+make CC=clang ubsan
+make CC=clang stress
 ```
 
-`make ci` runs unit, regression, protocol-v2 conformance/integration, system SIL, profile gates, and GCC analysis. The repository CI type-checks every application source in the inhibited bench profile and verifies that the vehicle profile remains blocked by the source-owned missing-clamp implementation latch. The ARM-GCC job currently builds the bench profile; a vehicle build is intentionally impossible until the numeric AMS clamp is implemented.
+Focused current-model targets:
 
-## AMS power protocol v2
+```sh
+make CC=clang torque-clamp
+make CC=clang residual-monitor
+make CC=clang current-model-differential
+```
 
-`make power-consumer` runs the portable atomic-bundle conformance suite copied from the current AMS reference consumer. `make power-integration` runs the ECU wrapper and torque-gate integration suite with production power-authority gating enabled. Existing compact-frame legacy suites compile with the dynamic power gate disabled only to preserve their narrow historical test scope; production and profile-gate compilations default to requiring power protocol v2.
+Protocol targets:
 
-- `make power-golden` validates AMS v0.3.4 producer-generated CAN golden vectors against the ECU decoder.
+```sh
+make CC=clang power-consumer
+make CC=clang power-integration
+make CC=clang power-golden
+make CC=clang power-source-compat AMS_ROOT=/path/to/DER26-AMS/AMS
+```
+
+`power-source-compat` compiles the live AMS `ams_power_can.c` producer together with the ECU consumer, compares all six protocol-v2 payloads against locked vectors, and validates the decoded authority, envelope, and resource state. It requires a sibling AMS source tree and is intentionally separate from standalone `clang-ci`.
+
+## CI notes
+
+`make clang-ci` runs current-model contract tests, residual-monitor tests, independent Python/C vectors, legacy unit/regression suites, protocol-v2 conformance/integration/golden tests, system SIL, profile gates, and Clang analysis.
+
+Team CI may run portable suites with GCC and performs a bench ARM-GCC build. A fully acknowledged vehicle source may parse because the implementation latch is enabled, but the default vehicle build remains blocked by external BSPD, CM200, and clamp-validation evidence. The checked-in numerical calibration remains deliberately invalid.

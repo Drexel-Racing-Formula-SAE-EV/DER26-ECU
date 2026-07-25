@@ -19,6 +19,19 @@
 #define DER26_POWER_MAX_AGE_MS 250u
 #define DER26_POWER_MAX_BUNDLE_SKEW_MS 50u
 #define DER26_POWER_REQUIRED_GOOD_BUNDLES 2u
+#define DER26_POWER_NOMINAL_PUBLICATION_PERIOD_MS 100u
+#define DER26_POWER_COUNTER_MODULUS 16u
+
+/* Measured host-contract availability budgets at the nominal 10 Hz producer
+ * rate.  These are regression limits, not substitutes for target CAN timing
+ * evidence. */
+#define DER26_POWER_SINGLE_DROP_OUTAGE_BUDGET_MS 120u
+#define DER26_POWER_TWO_DROP_OUTAGE_BUDGET_MS 160u
+
+_Static_assert(DER26_POWER_MAX_AGE_MS <
+               (DER26_POWER_COUNTER_MODULUS *
+                DER26_POWER_NOMINAL_PUBLICATION_PERIOD_MS),
+               "Power authority stale window must be shorter than one full counter wrap");
 #define DER26_POWER_DCL_MAX_DA 1200u
 #define DER26_POWER_CCL_MAX_DA 150u
 #define DER26_POWER_DPL_MAX_10W 4000u

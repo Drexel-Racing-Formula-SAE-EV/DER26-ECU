@@ -28,6 +28,7 @@
 #define AMS_ECU_ELECTRICAL_CANBUS_ID 0x681u
 #define AMS_ECU_THERMAL_CANBUS_ID 0x682u
 #define AMS_ECU_HEALTH_CANBUS_ID 0x683u
+#define AMS_ECU_CURRENT_DIAG_CANBUS_ID 0x68Bu
 #define AMS_ECU_COMPACT_PROTOCOL_VERSION 1u
 
 /* Authoritative SoP/SoH protocol v2 from AMS v0.3.3+. */
@@ -148,6 +149,7 @@ typedef struct
     bool compact_electrical_sane;
     bool compact_electrical_stale;
     uint32_t last_electrical_rx_tick;
+    uint32_t compact_electrical_sequence;
 
     /* Compact 0x682 thermal frame. */
     int16_t max_temp_0p1c;
@@ -174,6 +176,19 @@ typedef struct
     bool compact_health_stale;
     uint32_t last_health_rx_tick;
 
+    /* Advisory 0x68B canonical pack-current source diagnostics. Source ID is
+     * never used to select a different torque model or grant authority. */
+    uint8_t current_source;
+    uint8_t current_quality;
+    uint8_t current_boundary;
+    uint8_t current_source_epoch;
+    uint16_t current_sample_sequence_low;
+    uint16_t current_sample_age_ms;
+    uint32_t current_physical_sample_tick;
+    bool current_diag_valid;
+    bool current_diag_sane;
+    uint32_t current_diag_rx_count;
+    uint32_t last_current_diag_rx_tick;
 
     /* Authoritative dynamic power envelope (0x684-0x687) plus optional
      * strategy/resource (0x689) and binding metadata (0x68A). */

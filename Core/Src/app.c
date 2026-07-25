@@ -22,6 +22,7 @@
 #include "tasks/acc_task.h"
 #include "tasks/dashboard_task.h"
 #include "tasks/cool_task.h"
+#include "power/ecu_pack_current_calibration.h"
 
 app_data_t app = {0};
 
@@ -101,9 +102,33 @@ void app_create()
 	app.cm200_rolling_counter = 0u;
 	app.cm200_target_torque_0p1nm = 0;
 	app.cm200_command_torque_0p1nm = 0;
+	app.torque_clamp_deadline_overrun_count = 0u;
 	app.ams_cm200_voltage_delta_0p1v = 0;
 	app.ams_cm200_voltage_crosscheck_valid = false;
 	app.ams_cm200_voltage_mismatch = false;
+
+	/* The checked-in calibration is intentionally invalid, so qualification
+	 * normally leaves the runtime handle unqualified until a separately
+	 * reviewed release calibration is linked. Runtime model calls never CRC the
+	 * calibration again. */
+	ecu_torque_clamp_state_init(&app.torque_clamp_state);
+	ecu_current_residual_monitor_init(&app.current_residual_monitor);
+	memset(&app.current_prediction, 0, sizeof(app.current_prediction));
+	app.current_model_residual_fault = false;
+	app.current_residual_violation_count = 0u;
+	/* Automatic mid-run source switching is prohibited in this release. A boot
+	 * creates one source epoch; a future source-diagnostic CAN frame can replace
+	 * this fixed boot epoch when controlled runtime switching is certified. */
+	app.current_source_epoch = 1u;
+	app.current_measurement_sequence = 0u;
+	app.torque_clamp_last_cycles = 0u;
+	app.torque_clamp_max_cycles = 0u;
+	app.torque_clamp_soft_overrun_count = 0u;
+	app.battery_authority_state =
+		(uint8_t)ECU_BATTERY_AUTHORITY_TORQUE_EXHAUSTED;
+	(void)ecu_pack_current_calibration_qualify(
+		&g_ecu_pack_current_calibration, 1u,
+		&app.pack_current_calibration_runtime);
 
 	app.brakelight = false;
 

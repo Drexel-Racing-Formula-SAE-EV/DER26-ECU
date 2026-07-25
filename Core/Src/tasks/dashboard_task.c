@@ -22,17 +22,24 @@
 */
 void dashboard_task_fn(void *arg);
 
+static StaticTask_t dashboard_task_tcb;
+static StackType_t dashboard_task_stack[ECU_STACK_DASH_WORDS];
+static TaskHandle_t dashboard_task_handle = NULL;
+
 TaskHandle_t dashboard_task_start(app_data_t *data)
 {
-   TaskHandle_t handle = NULL;
+    if(data == NULL)
+    {
+        return NULL;
+    }
 
-   if(data == NULL)
-   {
-       return NULL;
-   }
-
-   xTaskCreate(dashboard_task_fn, "Dashboard task", 256, (void *)data, DASH_PRIO, &handle);
-   return handle;
+    if(dashboard_task_handle == NULL)
+    {
+        dashboard_task_handle = xTaskCreateStatic(dashboard_task_fn,
+            "Dashboard task", ECU_STACK_DASH_WORDS, (void *)data, DASH_PRIO,
+            dashboard_task_stack, &dashboard_task_tcb);
+    }
+    return dashboard_task_handle;
 }
 
 void dashboard_task_fn(void *arg)

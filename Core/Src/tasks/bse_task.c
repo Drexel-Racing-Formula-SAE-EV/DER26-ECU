@@ -11,6 +11,8 @@
 
 #include "tasks/bse_task.h"
 #include "main.h"
+#include "ext_drivers/elapsed_fault_timer.h"
+#include <math.h>
 
 #define ADC3_MUTEX_TIMEOUT_MS 10u
 
@@ -21,17 +23,24 @@
 */
 void bse_task_fn(void *arg);
 
+static StaticTask_t bse_task_tcb;
+static StackType_t bse_task_stack[ECU_STACK_BSE_WORDS];
+static TaskHandle_t bse_task_handle = NULL;
+
 TaskHandle_t bse_task_start(app_data_t *data)
 {
-   TaskHandle_t handle = NULL;
+    if(data == NULL)
+    {
+        return NULL;
+    }
 
-   if(data == NULL)
-   {
-       return NULL;
-   }
-
-   xTaskCreate(bse_task_fn, "BSE task", 256, (void *)data, BSE_PRIO, &handle);
-   return handle;
+    if(bse_task_handle == NULL)
+    {
+        bse_task_handle = xTaskCreateStatic(bse_task_fn,
+            "BSE task", ECU_STACK_BSE_WORDS, (void *)data, BSE_PRIO,
+            bse_task_stack, &bse_task_tcb);
+    }
+    return bse_task_handle;
 }
 
 void bse_task_fn(void *arg)
@@ -49,6 +58,7 @@ void bse_task_fn(void *arg)
     bool bse_plausible;
     bool adc_ok;
     uint32_t entry;
+    ecu_elapsed_fault_timer_t plausibility_timer = {0};
 
     for(;;)
     {
@@ -84,8 +94,13 @@ void bse_task_fn(void *arg)
         bse1->percent = pressure_sensor_get_percent(bse1);
         bse2->percent = pressure_sensor_get_percent(bse2);
 
-        /* T.4.3.3 (2022). */
-        bse_plausible = pressure_sensor_check_implausibility(bse1->percent, bse2->percent, PLAUSIBILITY_THRESH, BSE_FREQ / 10);
+        /* T.4.3.3 (2022): elapsed-time persistence, never loop count. */
+        const bool bse_split =
+            fabsf(bse1->percent - bse2->percent) >
+            (float)PLAUSIBILITY_THRESH;
+        bse_plausible = !ecu_elapsed_fault_timer_update(
+            &plausibility_timer, bse_split, entry,
+            ECU_BSE_IMPLAUSIBILITY_LIMIT_MS);
         data->bse_fault = (!bse_range_ok || !bse_plausible);
 
         brake_raw = (bse1->percent + bse2->percent) / 2.0f;

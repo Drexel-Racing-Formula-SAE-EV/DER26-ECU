@@ -26,6 +26,10 @@
 */
 void cool_task_fn(void *arg);
 
+static StaticTask_t cool_task_tcb;
+static StackType_t cool_task_stack[ECU_STACK_COOL_WORDS];
+static TaskHandle_t cool_task_handle = NULL;
+
 bool check_coolant_fault(app_data_t *data);
 /* Temp sensors: SEN-04-5 */
 float SEN_04_5_convert(uint16_t count);
@@ -36,15 +40,18 @@ float walfront_pressure_convert(float voltage);
 
 TaskHandle_t cool_task_start(app_data_t *data)
 {
-   TaskHandle_t handle = NULL;
+    if(data == NULL)
+    {
+        return NULL;
+    }
 
-   if(data == NULL)
-   {
-       return NULL;
-   }
-
-   xTaskCreate(cool_task_fn, "COOL task", 256, (void *)data, COOL_PRIO, &handle);
-   return handle;
+    if(cool_task_handle == NULL)
+    {
+        cool_task_handle = xTaskCreateStatic(cool_task_fn,
+            "COOL task", ECU_STACK_COOL_WORDS, (void *)data, COOL_PRIO,
+            cool_task_stack, &cool_task_tcb);
+    }
+    return cool_task_handle;
 }
 
 void cool_task_fn(void *arg)

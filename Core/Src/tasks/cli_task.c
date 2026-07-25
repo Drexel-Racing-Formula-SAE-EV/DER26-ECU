@@ -21,6 +21,10 @@
 * @param arg App_data struct pointer converted to void pointer
 */
 void cli_task_fn(void *arg);
+
+static StaticTask_t cli_task_tcb;
+static StackType_t cli_task_stack[ECU_STACK_CLI_WORDS];
+static TaskHandle_t cli_task_handle = NULL;
 int cli_handle_cmd(int argc, char *argv[]);
 void cmd_not_found(int argc, char *argv[]);
 
@@ -38,6 +42,7 @@ int get_can_status(int argc, char *argv[]);
 int get_cm200_status(int argc, char *argv[]);
 int get_task_status(int argc, char *argv[]);
 int get_bspd_status(int argc, char *argv[]);
+int get_power_status(int argc, char *argv[]);
 int ssa(int argc, char *argv[]);
 int sd(int argc, char *argv[]);
 
@@ -55,6 +60,7 @@ command_t cmds[] =
 	{"cm200", &get_cm200_status, "CM200 broadcasts, freshness, faults, and command integrity"},
 	{"tasks", &get_task_status, "task stack high-water marks in words"},
 	{"bspd", &get_bspd_status, "BSPD raw-OK and decoded fault status"},
+	{"power", &get_power_status, "torque clamp, current model, and residual-monitor status"},
 	{"throttle", &get_throttle, "get the throttle percentage"},
 	{"brakelight", &get_brakelight, "get the brake light status"},
 	{"brake", &get_brake, "get the brake percentage"},
@@ -67,15 +73,18 @@ command_t cmds[] =
 
 TaskHandle_t cli_task_start(app_data_t *app_data)
 {
-   TaskHandle_t handle = NULL;
+    if(app_data == NULL)
+    {
+        return NULL;
+    }
 
-   if(app_data == NULL)
-   {
-       return NULL;
-   }
-
-   xTaskCreate(cli_task_fn, "CLI task", 1024, (void *)app_data, CLI_PRIO, &handle);
-   return handle;
+    if(cli_task_handle == NULL)
+    {
+        cli_task_handle = xTaskCreateStatic(cli_task_fn,
+            "CLI task", ECU_STACK_CLI_WORDS, (void *)app_data, CLI_PRIO,
+            cli_task_stack, &cli_task_tcb);
+    }
+    return cli_task_handle;
 }
 
 void cli_task_fn(void *arg)
@@ -397,6 +406,105 @@ int get_task_status(int argc, char *argv[])
 	         "STACK words acc:%lu dash:%lu",
 	         task_stack_words(data->acc_task),
 	         task_stack_words(data->dashboard_task));
+	cli_printline(cli, outline);
+	return 0;
+}
+
+
+int get_power_status(int argc, char *argv[])
+{
+	int16_t target_torque_0p1nm;
+	int16_t command_torque_0p1nm;
+	uint8_t reason;
+	uint8_t authority_state;
+	uint16_t steady_calls;
+	uint16_t transition_calls;
+	uint16_t cells_evaluated;
+	uint32_t deadline_overruns;
+	uint32_t clamp_last_cycles;
+	uint32_t clamp_max_cycles;
+	uint32_t clamp_soft_overruns;
+	uint32_t clamp_consecutive_overruns;
+	bool clamp_overrun_fault;
+	uint32_t residual_violations;
+	uint32_t source_epoch;
+	bool output_valid;
+	bool residual_fault;
+	ecu_torque_clamp_state_t clamp_state;
+	ecu_current_prediction_snapshot_t prediction;
+	bool calibration_qualified;
+	uint32_t calibration_generation;
+	int32_t predicted_min_0p1a;
+	int32_t predicted_max_0p1a;
+
+	(void)argc;
+	(void)argv;
+
+	taskENTER_CRITICAL();
+	target_torque_0p1nm = data->cm200_target_torque_0p1nm;
+	command_torque_0p1nm = data->cm200_command_torque_0p1nm;
+	reason = data->torque_clamp_reason;
+	authority_state = data->battery_authority_state;
+	steady_calls = data->torque_clamp_steady_calls;
+	transition_calls = data->torque_clamp_transition_calls;
+	cells_evaluated = data->torque_clamp_cells_evaluated;
+	deadline_overruns = data->torque_clamp_deadline_overrun_count;
+	clamp_last_cycles = data->torque_clamp_last_cycles;
+	clamp_max_cycles = data->torque_clamp_max_cycles;
+	clamp_soft_overruns = data->torque_clamp_soft_overrun_count;
+	clamp_consecutive_overruns =
+		data->torque_clamp_consecutive_overruns;
+	clamp_overrun_fault = data->torque_clamp_overrun_fault;
+	output_valid = data->torque_clamp_output_valid;
+	residual_fault = data->current_model_residual_fault;
+	residual_violations = data->current_residual_violation_count;
+	source_epoch = data->current_source_epoch;
+	clamp_state = data->torque_clamp_state;
+	prediction = data->current_prediction;
+	calibration_qualified = data->pack_current_calibration_runtime.qualified;
+	calibration_generation = data->pack_current_calibration_runtime.generation;
+	taskEXIT_CRITICAL();
+
+	predicted_min_0p1a = (int32_t)(prediction.predicted_pack_current_a.min_a * 10.0f);
+	predicted_max_0p1a = (int32_t)(prediction.predicted_pack_current_a.max_a * 10.0f);
+
+	snprintf(outline, CLI_LINESZ,
+	         "PWR tgt:%d cmd:%d reason:%u auth:%u valid:%u",
+	         (int)target_torque_0p1nm, (int)command_torque_0p1nm,
+	         (unsigned)reason, (unsigned)authority_state,
+	         (unsigned)output_valid);
+	cli_printline(cli, outline);
+	snprintf(outline, CLI_LINESZ,
+	         "PWR path:%u sign:%u phase:%u active:%u zero:%u calls:%u/%u cells:%u",
+	         (unsigned)clamp_state.path_state,
+	         (unsigned)clamp_state.last_nonzero_committed_sign,
+	         (unsigned)clamp_state.monitor_phase,
+	         (unsigned)clamp_state.transition.active,
+	         (unsigned)clamp_state.physical_zero_confirmed,
+	         (unsigned)steady_calls, (unsigned)transition_calls,
+	         (unsigned)cells_evaluated);
+	cli_printline(cli, outline);
+	snprintf(outline, CLI_LINESZ,
+	         "PWR pred:%ld..%ld dA pred_valid:%u residual:%u/%lu epoch:%lu",
+	         (long)predicted_min_0p1a, (long)predicted_max_0p1a,
+	         (unsigned)prediction.valid, (unsigned)residual_fault,
+	         (unsigned long)residual_violations, (unsigned long)source_epoch);
+	cli_printline(cli, outline);
+	snprintf(outline, CLI_LINESZ,
+	         "PWR cal:%u gen:%lu hard:%lu soft:%lu consec:%lu fault:%u",
+	         (unsigned)calibration_qualified,
+	         (unsigned long)calibration_generation,
+	         (unsigned long)deadline_overruns,
+	         (unsigned long)clamp_soft_overruns,
+	         (unsigned long)clamp_consecutive_overruns,
+	         (unsigned)clamp_overrun_fault);
+	cli_printline(cli, outline);
+	snprintf(outline, CLI_LINESZ,
+	         "PWR WCET cycles last/max:%lu/%lu us:%lu/%lu",
+	         (unsigned long)clamp_last_cycles,
+	         (unsigned long)clamp_max_cycles,
+	         (unsigned long)stm32f767_cycles_to_us(clamp_last_cycles),
+	         (unsigned long)stm32f767_cycles_to_us(clamp_max_cycles));
 	cli_printline(cli, outline);
 	return 0;
 }

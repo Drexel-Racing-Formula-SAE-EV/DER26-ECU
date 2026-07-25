@@ -21,17 +21,24 @@
  */
 void error_task_fn(void *arg);
 
+static StaticTask_t error_task_tcb;
+static StackType_t error_task_stack[ECU_STACK_ERROR_WORDS];
+static TaskHandle_t error_task_handle = NULL;
+
 TaskHandle_t error_task_start(app_data_t *data)
 {
-    TaskHandle_t handle = NULL;
-
     if(data == NULL)
     {
         return NULL;
     }
 
-    xTaskCreate(error_task_fn, "ERROR task", 256, (void *)data, ERR_PRIO, &handle);
-    return handle;
+    if(error_task_handle == NULL)
+    {
+        error_task_handle = xTaskCreateStatic(error_task_fn,
+            "ERROR task", ECU_STACK_ERROR_WORDS, (void *)data, ERR_PRIO,
+            error_task_stack, &error_task_tcb);
+    }
+    return error_task_handle;
 }
 
 void error_task_fn(void *arg)
@@ -150,6 +157,7 @@ void error_task_fn(void *arg)
 //							data->cascadia_error
 //						    );
         base_hard_fault = (data->coolant_fault ||
+                           data->torque_clamp_overrun_fault ||
                            data->cascadia_error ||
                            data->startup_fault ||
                            data->task_heartbeat_fault);
@@ -236,6 +244,7 @@ void error_task_fn(void *arg)
                             data->canbus_fault ||
                             data->ams_fault ||
                             data->cm200_fault ||
+                            data->current_model_residual_fault ||
                             data->dashboard_fault);
 
         shutdown_faults = power_faults;

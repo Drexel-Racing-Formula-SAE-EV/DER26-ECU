@@ -26,6 +26,16 @@ static uint16_t be_u16(const uint8_t *data)
     return (uint16_t)(((uint16_t)data[0] << 8u) | data[1]);
 }
 
+/* Shortest modular distance between two 32-bit millisecond timestamps.
+ * All accepted freshness and bundle-skew windows are far below INT32_MAX,
+ * so this remains unambiguous across the system-tick wrap boundary. */
+static uint32_t tick_distance_ms(uint32_t a, uint32_t b)
+{
+    uint32_t a_to_b = a - b;
+    uint32_t b_to_a = b - a;
+    return (a_to_b < b_to_a) ? a_to_b : b_to_a;
+}
+
 static bool segment_nibble_valid(uint8_t segment)
 {
     return (segment <= 4u) || (segment == 0x0Fu);
@@ -624,8 +634,8 @@ bool der26_power_consumer_get_feasibility_envelope(
        (consumer->binding_metadata.counter == envelope->counter) &&
        ((uint32_t)(now_ms - consumer->binding_metadata.received_ms) <=
         DER26_POWER_MAX_AGE_MS) &&
-       ((uint32_t)(consumer->binding_metadata.received_ms -
-                   consumer->active_immediate.received_ms) <=
+       (tick_distance_ms(consumer->binding_metadata.received_ms,
+                         consumer->active_immediate.received_ms) <=
         DER26_POWER_MAX_BUNDLE_SKEW_MS))
     {
         memcpy(envelope->discharge_binding,
@@ -662,8 +672,8 @@ bool der26_power_consumer_get_resource_state(
        (consumer->resource.counter != consumer->active_immediate.counter) ||
        ((uint32_t)(now_ms - consumer->resource.received_ms) >
         DER26_POWER_MAX_AGE_MS) ||
-       ((uint32_t)(consumer->resource.received_ms -
-                   consumer->active_immediate.received_ms) >
+       (tick_distance_ms(consumer->resource.received_ms,
+                         consumer->active_immediate.received_ms) >
         DER26_POWER_MAX_BUNDLE_SKEW_MS))
     {
         return false;

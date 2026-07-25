@@ -19,17 +19,24 @@
 */
 void bppc_task_fn(void *arg);
 
+static StaticTask_t bppc_task_tcb;
+static StackType_t bppc_task_stack[ECU_STACK_BPPC_WORDS];
+static TaskHandle_t bppc_task_handle = NULL;
+
 TaskHandle_t bppc_task_start(app_data_t *data)
 {
-   TaskHandle_t handle = NULL;
+    if(data == NULL)
+    {
+        return NULL;
+    }
 
-   if(data == NULL)
-   {
-       return NULL;
-   }
-
-   xTaskCreate(bppc_task_fn, "BPPC task", 256, (void *)data, BPPC_PRIO, &handle);
-   return handle;
+    if(bppc_task_handle == NULL)
+    {
+        bppc_task_handle = xTaskCreateStatic(bppc_task_fn,
+            "BPPC task", ECU_STACK_BPPC_WORDS, (void *)data, BPPC_PRIO,
+            bppc_task_stack, &bppc_task_tcb);
+    }
+    return bppc_task_handle;
 }
 
 void bppc_task_fn(void *arg)

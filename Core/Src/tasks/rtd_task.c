@@ -21,17 +21,24 @@
 */
 void rtd_task_fn(void *arg);
 
+static StaticTask_t rtd_task_tcb;
+static StackType_t rtd_task_stack[ECU_STACK_RTD_WORDS];
+static TaskHandle_t rtd_task_handle = NULL;
+
 TaskHandle_t rtd_task_start(app_data_t *data)
 {
-   TaskHandle_t handle = NULL;
+    if(data == NULL)
+    {
+        return NULL;
+    }
 
-   if(data == NULL)
-   {
-       return NULL;
-   }
-
-   xTaskCreate(rtd_task_fn, "RTD task", 256, (void *)data, RTD_PRIO, &handle);
-   return handle;
+    if(rtd_task_handle == NULL)
+    {
+        rtd_task_handle = xTaskCreateStatic(rtd_task_fn,
+            "RTD task", ECU_STACK_RTD_WORDS, (void *)data, RTD_PRIO,
+            rtd_task_stack, &rtd_task_tcb);
+    }
+    return rtd_task_handle;
 }
 
 void rtd_task_fn(void *arg)
