@@ -287,10 +287,10 @@ clang-analyze: make-build-dir
 	$(CLANG) $(CFLAGS_COMMON) --analyze -Xanalyzer -analyzer-output=text $(REV7_INVARIANT_SRC)
 
 residual-authority-gate:
-	$(ECU_ROOT)/ci/scripts/check_residual_authority_gate.sh $(ECU_ROOT)
+	bash $(ECU_ROOT)/ci/scripts/check_residual_authority_gate.sh $(ECU_ROOT)
 
 current-model-evidence-gate:
-	$(ECU_ROOT)/ci/scripts/check_current_model_evidence_gate.sh $(ECU_ROOT)
+	bash $(ECU_ROOT)/ci/scripts/check_current_model_evidence_gate.sh $(ECU_ROOT)
 
 static-allocation-gate:
 	@! grep -R -n -E 'xTaskCreate\(' $(ECU_ROOT)/Core/Src/tasks $(ECU_ROOT)/Core/Src/app.c || \
