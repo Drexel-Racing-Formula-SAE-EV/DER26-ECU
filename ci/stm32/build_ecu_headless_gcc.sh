@@ -37,6 +37,8 @@ CFLAGS=(
   -Wextra
   -Wno-unused-parameter
   -Wno-missing-field-initializers
+  -Werror=implicit-function-declaration
+  -Werror=int-conversion
   -DDEBUG
   -DUSE_HAL_DRIVER
   -DSTM32F767xx
@@ -73,8 +75,21 @@ FREERTOS_SOURCES=(
   "$ROOT_DIR/Middlewares/Third_Party/FreeRTOS/Source/timers.c"
   "$ROOT_DIR/Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2/cmsis_os2.c"
   "$ROOT_DIR/Middlewares/Third_Party/FreeRTOS/Source/portable/GCC/ARM_CM7/r0p1/port.c"
-  "$ROOT_DIR/Middlewares/Third_Party/FreeRTOS/Source/portable/MemMang/heap_4.c"
 )
+
+FREERTOS_CONFIG="$ROOT_DIR/Core/Inc/FreeRTOSConfig.h"
+if grep -Eq '^[[:space:]]*#define[[:space:]]+configSUPPORT_DYNAMIC_ALLOCATION[[:space:]]+1([[:space:]]|$)' \
+    "$FREERTOS_CONFIG"; then
+  FREERTOS_SOURCES+=(
+    "$ROOT_DIR/Middlewares/Third_Party/FreeRTOS/Source/portable/MemMang/heap_4.c"
+  )
+elif grep -Eq '^[[:space:]]*#define[[:space:]]+configSUPPORT_DYNAMIC_ALLOCATION[[:space:]]+0([[:space:]]|$)' \
+    "$FREERTOS_CONFIG"; then
+  echo "FreeRTOS static-only build: heap_4.c excluded."
+else
+  echo "Unable to resolve configSUPPORT_DYNAMIC_ALLOCATION in $FREERTOS_CONFIG"
+  exit 1
+fi
 
 for src in "${FREERTOS_SOURCES[@]}"; do
   if [[ -f "$src" ]]; then

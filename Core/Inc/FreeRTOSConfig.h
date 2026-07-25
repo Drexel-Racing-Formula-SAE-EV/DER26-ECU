@@ -65,8 +65,9 @@
 #define configMAX_PRIORITIES                     ( 56 )
 #define configMINIMAL_STACK_SIZE                 ((uint16_t)256)
 #define configTOTAL_HEAP_SIZE                    ((size_t)1024)
-/* heap_4.c remains in the generated project, but normal runtime
- * allocation is disabled and all application RTOS objects are static. */
+/* The ECU uses a static-only kernel configuration. The generated heap_4.c
+ * file remains in the repository for CubeMX compatibility but is excluded
+ * from the target build while dynamic allocation is disabled. */
 #define configMAX_TASK_NAME_LEN                  ( 16 )
 #define configUSE_TRACE_FACILITY                 1
 #define configUSE_16_BIT_TICKS                   0
@@ -117,7 +118,9 @@ to exclude the API function. */
  * The CMSIS-RTOS V2 FreeRTOS wrapper is dependent on the heap implementation used
  * by the application thus the correct define need to be enabled below
  */
+#if (configSUPPORT_DYNAMIC_ALLOCATION == 1)
 #define USE_FreeRTOS_HEAP_4
+#endif
 
 /* Cortex-M specific definitions. */
 #ifdef __NVIC_PRIO_BITS
