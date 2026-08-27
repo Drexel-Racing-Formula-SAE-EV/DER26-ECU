@@ -1,5 +1,36 @@
-Debug/*
-
-*.settings
-*.vscode
+# STM32CubeIDE / local workspace state
+.settings/
+.metadata/
+.vscode/
 *.launch
+
+# Target build outputs
+Debug/
+Release/
+build/
+ci_artifacts/
+*.elf
+*.bin
+*.hex
+*.map
+*.list
+*.lst
+*.su
+*.o
+*.d
+
+# Host-test build outputs
+host_tests/build/
+host_tests/*.out
+host_tests/*.log
+
+# Python/tool caches
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# OS/editor debris
+.DS_Store
+Thumbs.db
+*~
+*.swp

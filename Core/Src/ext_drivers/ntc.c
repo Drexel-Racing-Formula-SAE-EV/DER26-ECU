@@ -10,6 +10,10 @@
 
 void ntc_init(ntc_t *dev, ADC_HandleTypeDef *hadc, uint32_t channel)
 {
+	if(dev == NULL)
+	{
+		return;
+	}
 	dev->hadc = hadc;
 	dev->channel = channel;
 	dev->count = 0;

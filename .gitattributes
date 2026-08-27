@@ -1,0 +1,14 @@
+# Keep source/control files LF-only so Linux CI and shell scripts work.
+* text=auto
+
+*.c text eol=lf
+*.h text eol=lf
+*.s text eol=lf
+*.ld text eol=lf
+*.sh text eol=lf
+*.py text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.md text eol=lf
+*.ioc text eol=lf
+Makefile text eol=lf

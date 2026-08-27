@@ -92,6 +92,8 @@ void MX_TIM4_Init(void);
 #define CoolFlow_GPIO_Port GPIOA
 #define APPS1_Pin GPIO_PIN_3
 #define APPS1_GPIO_Port GPIOA
+#define Cascadia_ON_Pin GPIO_PIN_5
+#define Cascadia_ON_GPIO_Port GPIOA
 #define Firmware_Ok_Pin GPIO_PIN_7
 #define Firmware_Ok_GPIO_Port GPIOA
 #define TSAL_HV_SIG_Pin GPIO_PIN_5
@@ -108,12 +110,14 @@ void MX_TIM4_Init(void);
 #define IMD_Fail_GPIO_Port GPIOF
 #define BMS_Fail_Pin GPIO_PIN_15
 #define BMS_Fail_GPIO_Port GPIOF
-#define BSPD_Fail_Pin GPIO_PIN_13
-#define BSPD_Fail_GPIO_Port GPIOE
+#define BSPD_OK_Pin GPIO_PIN_13
+#define BSPD_OK_GPIO_Port GPIOE
 #define Brake_Light_Pin GPIO_PIN_14
 #define Brake_Light_GPIO_Port GPIOD
 #define SPI6_NSS_Pin GPIO_PIN_8
 #define SPI6_NSS_GPIO_Port GPIOG
+#define SD_SPI_HANDLE hspi6
+
 #define TMS_Pin GPIO_PIN_13
 #define TMS_GPIO_Port GPIOA
 #define TCK_Pin GPIO_PIN_14
@@ -124,7 +128,6 @@ void MX_TIM4_Init(void);
 #define CoolPump_GPIO_Port GPIOB
 
 /* USER CODE BEGIN Private defines */
-#define SD_SPI_HANDLE hspi6
 
 /* USER CODE END Private defines */
 

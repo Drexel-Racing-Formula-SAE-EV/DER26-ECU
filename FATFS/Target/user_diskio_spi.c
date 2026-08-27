@@ -26,6 +26,7 @@
 
 #include "stm32f7xx_hal.h" /* Provide the low-level HAL functions */
 #include "user_diskio_spi.h"
+#include <string.h>
 
 //Make sure you set #define SD_SPI_HANDLE as some hspix in main.h
 extern SPI_HandleTypeDef SD_SPI_HANDLE;
@@ -33,8 +34,8 @@ extern SPI_HandleTypeDef SD_SPI_HANDLE;
 /* Function prototypes */
 
 //(Note that the _256 is used as a mask to clear the prescalar bits as it provides binary 111 in the correct position)
-#define FCLK_SLOW() { MODIFY_REG(SD_SPI_HANDLE.Instance->CR1, SPI_BAUDRATEPRESCALER_256, SPI_BAUDRATEPRESCALER_128); }	/* Set SCLK = slow, approx 280 KBits/s*/
-#define FCLK_FAST() { MODIFY_REG(SD_SPI_HANDLE.Instance->CR1, SPI_BAUDRATEPRESCALER_256, SPI_BAUDRATEPRESCALER_8); }	/* Set SCLK = fast, approx 4.5 MBits/s */
+#define FCLK_SLOW() do { __HAL_SPI_DISABLE(&SD_SPI_HANDLE); MODIFY_REG(SD_SPI_HANDLE.Instance->CR1, SPI_CR1_BR, SPI_BAUDRATEPRESCALER_256); __HAL_SPI_ENABLE(&SD_SPI_HANDLE); } while (0) /* 108 MHz / 256 = 421.875 kHz */
+#define FCLK_FAST() do { __HAL_SPI_DISABLE(&SD_SPI_HANDLE); MODIFY_REG(SD_SPI_HANDLE.Instance->CR1, SPI_CR1_BR, SPI_BAUDRATEPRESCALER_8); __HAL_SPI_ENABLE(&SD_SPI_HANDLE); } while (0) /* 108 MHz / 8 = 13.5 MHz */
 
 #define CS_HIGH()	{HAL_GPIO_WritePin(SPI6_NSS_GPIO_Port, SPI6_NSS_Pin, GPIO_PIN_SET);}
 #define CS_LOW()	{HAL_GPIO_WritePin(SPI6_NSS_GPIO_Port, SPI6_NSS_Pin, GPIO_PIN_RESET);}
@@ -77,9 +78,54 @@ extern SPI_HandleTypeDef SD_SPI_HANDLE;
 static volatile
 DSTATUS Stat = STA_NOINIT;	/* Physical drive status */
 
-
 static
 BYTE CardType;			/* Card type flags */
+
+static user_spi_sd_diag_t SdDiag = {
+    USER_SPI_SD_STAGE_IDLE, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0u, 0u
+};
+
+static void sd_diag_reset(void)
+{
+    SdDiag.stage = USER_SPI_SD_STAGE_IDLE;
+    SdDiag.cmd0_r1 = 0xFFu;
+    SdDiag.cmd8_r1 = 0xFFu;
+    SdDiag.acmd41_or_cmd1_r1 = 0xFFu;
+    SdDiag.cmd58_or_cmd16_r1 = 0xFFu;
+    SdDiag.card_type = 0u;
+    SdDiag.csd_valid = 0u;
+}
+
+void USER_SPI_get_diag(user_spi_sd_diag_t *out)
+{
+    if (out != NULL) { *out = SdDiag; }
+}
+
+void USER_SPI_force_not_ready(void)
+{
+    CardType = 0u;
+    Stat = STA_NOINIT;
+    SdDiag.card_type = 0u;
+    if (SdDiag.stage != USER_SPI_SD_STAGE_IDLE) {
+        SdDiag.stage = USER_SPI_SD_STAGE_FAILED;
+    }
+}
+
+const char *USER_SPI_stage_name(user_spi_sd_stage_t stage)
+{
+    switch (stage) {
+    case USER_SPI_SD_STAGE_IDLE: return "IDLE";
+    case USER_SPI_SD_STAGE_STARTUP_CLOCKS: return "CLOCKS";
+    case USER_SPI_SD_STAGE_CMD0: return "CMD0";
+    case USER_SPI_SD_STAGE_CMD8: return "CMD8";
+    case USER_SPI_SD_STAGE_ACMD41_OR_CMD1: return "ACMD41/CMD1";
+    case USER_SPI_SD_STAGE_CMD58_OR_CMD16: return "CMD58/CMD16";
+    case USER_SPI_SD_STAGE_CSD_VERIFY: return "CSD";
+    case USER_SPI_SD_STAGE_READY: return "READY";
+    case USER_SPI_SD_STAGE_FAILED: return "FAILED";
+    default: return "UNKNOWN";
+    }
+}
 
 uint32_t spiTimerTickStart;
 uint32_t spiTimerTickDelay;
@@ -103,8 +149,8 @@ BYTE xchg_spi (
 	BYTE dat	/* Data to send */
 )
 {
-	BYTE rxDat;
-    HAL_SPI_TransmitReceive(&SD_SPI_HANDLE, &dat, &rxDat, 1, 50);
+	BYTE rxDat = 0xFFu;
+    if (HAL_SPI_TransmitReceive(&SD_SPI_HANDLE, &dat, &rxDat, 1u, 50u) != HAL_OK) { return 0xFFu; }
     return rxDat;
 }
 
@@ -130,7 +176,7 @@ void xmit_spi_multi (
 	UINT btx			/* Number of bytes to send (even number) */
 )
 {
-	HAL_SPI_Transmit(&SD_SPI_HANDLE, buff, btx, HAL_MAX_DELAY);
+	(void)HAL_SPI_Transmit(&SD_SPI_HANDLE, (uint8_t *)buff, btx, 500u);
 }
 #endif
 
@@ -314,63 +360,118 @@ BYTE send_cmd (		/* Return value: R1 resp (bit7==1:Failed to send) */
 /* Initialize disk drive                                                 */
 /*-----------------------------------------------------------------------*/
 
-inline DSTATUS USER_SPI_initialize (
+DSTATUS USER_SPI_initialize (
 	BYTE drv		/* Physical drive number (0) */
 )
 {
-	BYTE n, cmd, ty, ocr[4];
+	BYTE n, cmd = 0u, ty = 0u, ocr[4] = {0u, 0u, 0u, 0u};
+	BYTE csd[16];
+	BYTE r1;
+	int csd_all_zero = 1;
+	int csd_all_ff = 1;
 
-	if (drv != 0) return STA_NOINIT;		/* Supports only drive 0 */
-	//assume SPI already init init_spi();	/* Initialize SPI */
+	if (drv != 0u) return STA_NOINIT;
 
-	if (Stat & STA_NODISK) return Stat;	/* Is card existing in the soket? */
+	sd_diag_reset();
+	CardType = 0u;
+	Stat = STA_NOINIT;
 
 	FCLK_SLOW();
-	for (n = 10; n; n--) xchg_spi(0xFF);	/* Send 80 dummy clocks */
+	CS_HIGH();
+	HAL_Delay(2u);
+	SdDiag.stage = USER_SPI_SD_STAGE_STARTUP_CLOCKS;
+	for (n = 10u; n != 0u; n--) xchg_spi(0xFFu); /* 80 clocks with CS high */
 
-	ty = 0;
-	if (send_cmd(CMD0, 0) == 1) {			/* Put the card SPI/Idle state */
-		SPI_Timer_On(1000);					/* Initialization timeout = 1 sec */
-		if (send_cmd(CMD8, 0x1AA) == 1) {	/* SDv2? */
-			for (n = 0; n < 4; n++) ocr[n] = xchg_spi(0xFF);	/* Get 32 bit return value of R7 resp */
-			if (ocr[2] == 0x01 && ocr[3] == 0xAA) {				/* Is the card supports vcc of 2.7-3.6V? */
-				while (SPI_Timer_Status() && send_cmd(ACMD41, 1UL << 30)) ;	/* Wait for end of initialization with ACMD41(HCS) */
-				if (SPI_Timer_Status() && send_cmd(CMD58, 0) == 0) {		/* Check CCS bit in the OCR */
-					for (n = 0; n < 4; n++) ocr[n] = xchg_spi(0xFF);
-					ty = (ocr[0] & 0x40) ? CT_SD2 | CT_BLOCK : CT_SD2;	/* Card id SDv2 */
-				}
-			}
-		} else {	/* Not SDv2 card */
-			if (send_cmd(ACMD41, 0) <= 1) 	{	/* SDv1 or MMC? */
-				ty = CT_SD1; cmd = ACMD41;	/* SDv1 (ACMD41(0)) */
-			} else {
-				ty = CT_MMC; cmd = CMD1;	/* MMCv3 (CMD1(0)) */
-			}
-			while (SPI_Timer_Status() && send_cmd(cmd, 0)) ;		/* Wait for end of initialization */
-			if (!SPI_Timer_Status() || send_cmd(CMD16, 512) != 0)	/* Set block length: 512 */
-				ty = 0;
+	SdDiag.stage = USER_SPI_SD_STAGE_CMD0;
+	r1 = send_cmd(CMD0, 0u);
+	SdDiag.cmd0_r1 = r1;
+	if (r1 != 0x01u) goto failed;
+
+	SPI_Timer_On(1000u);
+	SdDiag.stage = USER_SPI_SD_STAGE_CMD8;
+	r1 = send_cmd(CMD8, 0x1AAu);
+	SdDiag.cmd8_r1 = r1;
+
+	if (r1 == 0x01u) {
+		for (n = 0u; n < 4u; n++) ocr[n] = xchg_spi(0xFFu);
+		if (ocr[2] != 0x01u || ocr[3] != 0xAAu) goto failed;
+
+		SdDiag.stage = USER_SPI_SD_STAGE_ACMD41_OR_CMD1;
+		do {
+			r1 = send_cmd(ACMD41, 1UL << 30);
+			SdDiag.acmd41_or_cmd1_r1 = r1;
+		} while (SPI_Timer_Status() && r1 == 0x01u);
+		if (r1 != 0x00u) goto failed;
+
+		SdDiag.stage = USER_SPI_SD_STAGE_CMD58_OR_CMD16;
+		r1 = send_cmd(CMD58, 0u);
+		SdDiag.cmd58_or_cmd16_r1 = r1;
+		if (r1 != 0x00u) goto failed;
+		for (n = 0u; n < 4u; n++) ocr[n] = xchg_spi(0xFFu);
+		ty = (ocr[0] & 0x40u) ? (CT_SD2 | CT_BLOCK) : CT_SD2;
+	} else {
+		/* Legacy SDv1/MMC path. Reject impossible/undefined R1 values. */
+		if ((r1 & 0x80u) != 0u || r1 == 0x00u) goto failed;
+
+		SdDiag.stage = USER_SPI_SD_STAGE_ACMD41_OR_CMD1;
+		r1 = send_cmd(ACMD41, 0u);
+		if (r1 <= 0x01u) {
+			ty = CT_SD1;
+			cmd = ACMD41;
+		} else {
+			ty = CT_MMC;
+			cmd = CMD1;
 		}
+		do {
+			r1 = send_cmd(cmd, 0u);
+			SdDiag.acmd41_or_cmd1_r1 = r1;
+		} while (SPI_Timer_Status() && r1 == 0x01u);
+		if (r1 != 0x00u) goto failed;
+
+		SdDiag.stage = USER_SPI_SD_STAGE_CMD58_OR_CMD16;
+		r1 = send_cmd(CMD16, 512u);
+		SdDiag.cmd58_or_cmd16_r1 = r1;
+		if (r1 != 0x00u) goto failed;
 	}
-	CardType = ty;	/* Card type */
+
+	/* A second, independent proof that a real card exists. A floating MISO line
+	 * can occasionally mimic one-byte R1 values, but cannot realistically
+	 * produce a valid CMD9 data token plus a nonconstant 16-byte CSD. */
+	SdDiag.stage = USER_SPI_SD_STAGE_CSD_VERIFY;
+	memset(csd, 0, sizeof(csd));
+	if (send_cmd(CMD9, 0u) != 0x00u || !rcvr_datablock(csd, sizeof(csd))) goto failed;
+	for (n = 0u; n < sizeof(csd); n++) {
+		if (csd[n] != 0x00u) csd_all_zero = 0;
+		if (csd[n] != 0xFFu) csd_all_ff = 0;
+	}
+	if (csd_all_zero || csd_all_ff) goto failed;
+	if ((ty & CT_SDC) != 0u && ((csd[0] >> 6) > 1u)) goto failed;
+
+	SdDiag.csd_valid = 1u;
+	CardType = ty;
+	SdDiag.card_type = ty;
 	despiselect();
+	FCLK_FAST();
+	Stat &= (DSTATUS)~STA_NOINIT;
+	SdDiag.stage = USER_SPI_SD_STAGE_READY;
+	return Stat;
 
-	if (ty) {			/* OK */
-		FCLK_FAST();			/* Set fast clock */
-		Stat &= ~STA_NOINIT;	/* Clear STA_NOINIT flag */
-	} else {			/* Failed */
-		Stat = STA_NOINIT;
-	}
-
+failed:
+	despiselect();
+	CardType = 0u;
+	SdDiag.card_type = 0u;
+	SdDiag.csd_valid = 0u;
+	Stat = STA_NOINIT;
+	SdDiag.stage = USER_SPI_SD_STAGE_FAILED;
 	return Stat;
 }
-
 
 
 /*-----------------------------------------------------------------------*/
 /* Get disk status                                                       */
 /*-----------------------------------------------------------------------*/
 
-inline DSTATUS USER_SPI_status (
+DSTATUS USER_SPI_status (
 	BYTE drv		/* Physical drive number (0) */
 )
 {
@@ -385,7 +486,7 @@ inline DSTATUS USER_SPI_status (
 /* Read sector(s)                                                        */
 /*-----------------------------------------------------------------------*/
 
-inline DRESULT USER_SPI_read (
+DRESULT USER_SPI_read (
 	BYTE drv,		/* Physical drive number (0) */
 	BYTE *buff,		/* Pointer to the data buffer to store read data */
 	DWORD sector,	/* Start sector number (LBA) */
@@ -424,7 +525,7 @@ inline DRESULT USER_SPI_read (
 /*-----------------------------------------------------------------------*/
 
 #if _USE_WRITE
-inline DRESULT USER_SPI_write (
+DRESULT USER_SPI_write (
 	BYTE drv,			/* Physical drive number (0) */
 	const BYTE *buff,	/* Ponter to the data to write */
 	DWORD sector,		/* Start sector number (LBA) */
@@ -465,7 +566,7 @@ inline DRESULT USER_SPI_write (
 /*-----------------------------------------------------------------------*/
 
 #if _USE_IOCTL
-inline DRESULT USER_SPI_ioctl (
+DRESULT USER_SPI_ioctl (
 	BYTE drv,		/* Physical drive number (0) */
 	BYTE cmd,		/* Control command code */
 	void *buff		/* Pointer to the conrtol data */
@@ -484,6 +585,11 @@ inline DRESULT USER_SPI_ioctl (
 	switch (cmd) {
 	case CTRL_SYNC :		/* Wait for end of internal write process of the drive */
 		if (spiselect()) res = RES_OK;
+		break;
+
+	case GET_SECTOR_SIZE:
+		*(WORD *)buff = 512u;
+		res = RES_OK;
 		break;
 
 	case GET_SECTOR_COUNT :	/* Get drive capacity in unit of sector (DWORD) */

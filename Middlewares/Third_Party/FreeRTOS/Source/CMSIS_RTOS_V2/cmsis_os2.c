@@ -89,11 +89,16 @@
 
 #define KERNEL_ID                 ("FreeRTOS " tskKERNEL_VERSION_NUMBER)
 
-/* Timer callback information structure definition */
+/* Timer callback information structure definition.
+ *
+ * This legacy CMSIS-RTOS2 adapter stores callback metadata with pvPortMalloc().
+ * Do not compile that path in the ECU static-only FreeRTOS configuration. */
+#if (configSUPPORT_DYNAMIC_ALLOCATION == 1)
 typedef struct {
   osTimerFunc_t func;
   void         *arg;
 } TimerCallback_t;
+#endif
 
 /* Kernel initialization state */
 static osKernelState_t KernelState = osKernelInactive;
@@ -455,13 +460,13 @@ osThreadId_t osThreadNew (osThreadFunc_t func, void *argument, const osThreadAtt
       hTask = xTaskCreateStatic ((TaskFunction_t)func, name, stack, argument, prio, (StackType_t  *)attr->stack_mem,
                                                                                     (StaticTask_t *)attr->cb_mem);
     }
-    else {
-      if (mem == 0) {
-        if (xTaskCreate ((TaskFunction_t)func, name, (uint16_t)stack, argument, prio, &hTask) != pdPASS) {
-          hTask = NULL;
-        }
+#if (configSUPPORT_DYNAMIC_ALLOCATION == 1)
+    else if (mem == 0) {
+      if (xTaskCreate ((TaskFunction_t)func, name, (uint16_t)stack, argument, prio, &hTask) != pdPASS) {
+        hTask = NULL;
       }
     }
+#endif
   }
 
   return ((osThreadId_t)hTask);
@@ -652,6 +657,7 @@ uint32_t osThreadGetCount (void) {
 }
 
 uint32_t osThreadEnumerate (osThreadId_t *thread_array, uint32_t array_items) {
+#if (configSUPPORT_DYNAMIC_ALLOCATION == 1)
   uint32_t i, count;
   TaskStatus_t *task;
 
@@ -670,6 +676,8 @@ uint32_t osThreadEnumerate (osThreadId_t *thread_array, uint32_t array_items) {
         thread_array[i] = (osThreadId_t)task[i].xHandle;
       }
       count = i;
+    } else {
+      count = 0U;
     }
     (void)xTaskResumeAll();
 
@@ -677,6 +685,11 @@ uint32_t osThreadEnumerate (osThreadId_t *thread_array, uint32_t array_items) {
   }
 
   return (count);
+#else
+  (void)thread_array;
+  (void)array_items;
+  return (0U);
+#endif
 }
 
 uint32_t osThreadFlagsSet (osThreadId_t thread_id, uint32_t flags) {
@@ -877,6 +890,7 @@ osStatus_t osDelayUntil (uint32_t ticks) {
 
 /*---------------------------------------------------------------------------*/
 
+#if (configSUPPORT_DYNAMIC_ALLOCATION == 1)
 static void TimerCallback (TimerHandle_t hTimer) {
   TimerCallback_t *callb;
 
@@ -886,8 +900,10 @@ static void TimerCallback (TimerHandle_t hTimer) {
     callb->func (callb->arg);
   }
 }
+#endif
 
 osTimerId_t osTimerNew (osTimerFunc_t func, osTimerType_t type, void *argument, const osTimerAttr_t *attr) {
+#if (configSUPPORT_DYNAMIC_ALLOCATION == 1)
   const char *name;
   TimerHandle_t hTimer;
   TimerCallback_t *callb;
@@ -897,7 +913,8 @@ osTimerId_t osTimerNew (osTimerFunc_t func, osTimerType_t type, void *argument, 
   hTimer = NULL;
 
   if (!IS_IRQ() && (func != NULL)) {
-    /* Allocate memory to store callback function and argument */
+    /* This adapter requires heap storage for TimerCallback_t even when the
+     * FreeRTOS timer control block itself is supplied statically. */
     callb = pvPortMalloc (sizeof(TimerCallback_t));
 
     if (callb != NULL) {
@@ -921,10 +938,8 @@ osTimerId_t osTimerNew (osTimerFunc_t func, osTimerType_t type, void *argument, 
         if ((attr->cb_mem != NULL) && (attr->cb_size >= sizeof(StaticTimer_t))) {
           mem = 1;
         }
-        else {
-          if ((attr->cb_mem == NULL) && (attr->cb_size == 0U)) {
-            mem = 0;
-          }
+        else if ((attr->cb_mem == NULL) && (attr->cb_size == 0U)) {
+          mem = 0;
         }
       }
       else {
@@ -934,15 +949,26 @@ osTimerId_t osTimerNew (osTimerFunc_t func, osTimerType_t type, void *argument, 
       if (mem == 1) {
         hTimer = xTimerCreateStatic (name, 1, reload, callb, TimerCallback, (StaticTimer_t *)attr->cb_mem);
       }
-      else {
-        if (mem == 0) {
-          hTimer = xTimerCreate (name, 1, reload, callb, TimerCallback);
-        }
+      else if (mem == 0) {
+        hTimer = xTimerCreate (name, 1, reload, callb, TimerCallback);
+      }
+
+      if (hTimer == NULL) {
+        vPortFree (callb);
       }
     }
   }
 
   return ((osTimerId_t)hTimer);
+#else
+  /* osTimerAttr_t has no caller-owned field for TimerCallback_t in this
+   * adapter. Reject CMSIS timer creation rather than silently allocating. */
+  (void)func;
+  (void)type;
+  (void)argument;
+  (void)attr;
+  return (NULL);
+#endif
 }
 
 const char *osTimerGetName (osTimerId_t timer_id) {
@@ -1019,10 +1045,10 @@ uint32_t osTimerIsRunning (osTimerId_t timer_id) {
 }
 
 osStatus_t osTimerDelete (osTimerId_t timer_id) {
+#if (configSUPPORT_DYNAMIC_ALLOCATION == 1) && !defined(USE_FreeRTOS_HEAP_1)
   TimerHandle_t hTimer = (TimerHandle_t)timer_id;
-  osStatus_t stat;
-#ifndef USE_FreeRTOS_HEAP_1
   TimerCallback_t *callb;
+  osStatus_t stat;
 
   if (IS_IRQ()) {
     stat = osErrorISR;
@@ -1040,11 +1066,12 @@ osStatus_t osTimerDelete (osTimerId_t timer_id) {
       stat = osErrorResource;
     }
   }
-#else
-  stat = osError;
-#endif
 
   return (stat);
+#else
+  (void)timer_id;
+  return (osError);
+#endif
 }
 
 /*---------------------------------------------------------------------------*/
@@ -1075,11 +1102,11 @@ osEventFlagsId_t osEventFlagsNew (const osEventFlagsAttr_t *attr) {
     if (mem == 1) {
       hEventGroup = xEventGroupCreateStatic (attr->cb_mem);
     }
-    else {
-      if (mem == 0) {
-        hEventGroup = xEventGroupCreate();
-      }
+#if (configSUPPORT_DYNAMIC_ALLOCATION == 1)
+    else if (mem == 0) {
+      hEventGroup = xEventGroupCreate();
     }
+#endif
   }
 
   return ((osEventFlagsId_t)hEventGroup);
@@ -1271,15 +1298,15 @@ osMutexId_t osMutexNew (const osMutexAttr_t *attr) {
           hMutex = xSemaphoreCreateMutexStatic (attr->cb_mem);
         }
       }
-      else {
-        if (mem == 0) {
-          if (rmtx != 0U) {
-            hMutex = xSemaphoreCreateRecursiveMutex ();
-          } else {
-            hMutex = xSemaphoreCreateMutex ();
-          }
+#if (configSUPPORT_DYNAMIC_ALLOCATION == 1)
+      else if (mem == 0) {
+        if (rmtx != 0U) {
+          hMutex = xSemaphoreCreateRecursiveMutex ();
+        } else {
+          hMutex = xSemaphoreCreateMutex ();
         }
       }
+#endif
 
       #if (configQUEUE_REGISTRY_SIZE > 0)
       if (hMutex != NULL) {
@@ -1450,9 +1477,11 @@ osSemaphoreId_t osSemaphoreNew (uint32_t max_count, uint32_t initial_count, cons
         if (mem == 1) {
           hSemaphore = xSemaphoreCreateBinaryStatic ((StaticSemaphore_t *)attr->cb_mem);
         }
+#if (configSUPPORT_DYNAMIC_ALLOCATION == 1)
         else {
           hSemaphore = xSemaphoreCreateBinary();
         }
+#endif
 
         if ((hSemaphore != NULL) && (initial_count != 0U)) {
           if (xSemaphoreGive (hSemaphore) != pdPASS) {
@@ -1465,9 +1494,11 @@ osSemaphoreId_t osSemaphoreNew (uint32_t max_count, uint32_t initial_count, cons
         if (mem == 1) {
           hSemaphore = xSemaphoreCreateCountingStatic (max_count, initial_count, (StaticSemaphore_t *)attr->cb_mem);
         }
+#if (configSUPPORT_DYNAMIC_ALLOCATION == 1)
         else {
           hSemaphore = xSemaphoreCreateCounting (max_count, initial_count);
         }
+#endif
       }
       
       #if (configQUEUE_REGISTRY_SIZE > 0)
@@ -1626,11 +1657,11 @@ osMessageQueueId_t osMessageQueueNew (uint32_t msg_count, uint32_t msg_size, con
     if (mem == 1) {
       hQueue = xQueueCreateStatic (msg_count, msg_size, attr->mq_mem, attr->cb_mem);
     }
-    else {
-      if (mem == 0) {
-        hQueue = xQueueCreate (msg_count, msg_size);
-      }
+#if (configSUPPORT_DYNAMIC_ALLOCATION == 1)
+    else if (mem == 0) {
+      hQueue = xQueueCreate (msg_count, msg_size);
     }
+#endif
 
     #if (configQUEUE_REGISTRY_SIZE > 0)
     if (hQueue != NULL) {

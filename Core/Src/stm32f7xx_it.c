@@ -24,6 +24,8 @@
 /* USER CODE BEGIN Includes */
 #include "cmsis_os.h"
 #include "app.h"
+#include "ext_drivers/ecu_data_logger.h"
+#include "ext_drivers/stm32f767.h"
 #include "string.h"
 /* USER CODE END Includes */
 
@@ -78,6 +80,7 @@ void NMI_Handler(void)
 {
   /* USER CODE BEGIN NonMaskableInt_IRQn 0 */
 
+  ecu_force_safe_outputs();
   /* USER CODE END NonMaskableInt_IRQn 0 */
   /* USER CODE BEGIN NonMaskableInt_IRQn 1 */
    while (1)
@@ -93,6 +96,7 @@ void HardFault_Handler(void)
 {
   /* USER CODE BEGIN HardFault_IRQn 0 */
 
+  ecu_force_safe_outputs();
   /* USER CODE END HardFault_IRQn 0 */
   while (1)
   {
@@ -108,6 +112,7 @@ void MemManage_Handler(void)
 {
   /* USER CODE BEGIN MemoryManagement_IRQn 0 */
 
+  ecu_force_safe_outputs();
   /* USER CODE END MemoryManagement_IRQn 0 */
   while (1)
   {
@@ -123,6 +128,7 @@ void BusFault_Handler(void)
 {
   /* USER CODE BEGIN BusFault_IRQn 0 */
 
+  ecu_force_safe_outputs();
   /* USER CODE END BusFault_IRQn 0 */
   while (1)
   {
@@ -138,6 +144,7 @@ void UsageFault_Handler(void)
 {
   /* USER CODE BEGIN UsageFault_IRQn 0 */
 
+  ecu_force_safe_outputs();
   /* USER CODE END UsageFault_IRQn 0 */
   while (1)
   {
@@ -167,6 +174,18 @@ void DebugMon_Handler(void)
 /******************************************************************************/
 
 /**
+  * @brief This function handles CAN1 TX interrupts.
+  */
+void CAN1_TX_IRQHandler(void)
+{
+  extern app_data_t app;
+  if(app.board.canbus.hcan != NULL)
+  {
+    HAL_CAN_IRQHandler(app.board.canbus.hcan);
+  }
+}
+
+/**
   * @brief This function handles CAN1 RX0 interrupts.
   */
 void CAN1_RX0_IRQHandler(void)
@@ -182,6 +201,18 @@ void CAN1_RX0_IRQHandler(void)
 #endif
   HAL_CAN_IRQHandler(hcan1);
   /* USER CODE END CAN1_RX0_IRQn 1 */
+}
+
+/**
+  * @brief This function handles CAN1 status change/error interrupts.
+  */
+void CAN1_SCE_IRQHandler(void)
+{
+  extern app_data_t app;
+  if(app.board.canbus.hcan != NULL)
+  {
+    HAL_CAN_IRQHandler(app.board.canbus.hcan);
+  }
 }
 
 /**
@@ -242,7 +273,7 @@ void UART7_IRQHandler(void)
   /* USER CODE BEGIN UART7_IRQn 0 */
 	extern app_data_t app;
 
-	UART_HandleTypeDef *huart7 = &app.board.stm32f767.huart7;
+	UART_HandleTypeDef *huart7 = app.board.stm32f767.huart7;
 #if 0
   /* USER CODE END UART7_IRQn 0 */
   HAL_UART_IRQHandler(&huart7);
@@ -256,17 +287,21 @@ void UART7_IRQHandler(void)
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart){
 	extern app_data_t app;
 	cli_t *cli = &app.board.cli;
-	char endl[] = "\r\n";
-	HAL_StatusTypeDef ret = 0;
+	HAL_StatusTypeDef ret;
 
-	if(cli->huart->Instance == huart->Instance)
+	if((cli->huart != NULL) && (cli->huart->Instance == huart->Instance))
 	{
-		if(cli->c == '\r')
+		/* Preserve a completed command until the CLI task has copied it.  New
+		 * bytes are discarded while pending instead of overwriting that line. */
+		if(cli->msg_pending)
 		{
-			ret = HAL_UART_Transmit_IT(cli->huart, (uint8_t *)endl, strlen(endl));
+			/* Nothing to mutate. */
+		}
+		else if(cli->c == '\r')
+		{
 			cli->line[cli->index] = '\0';
-			cli->index = 0;
-			if(strlen(cli->line) > 0)
+			cli->index = 0u;
+			if(strnlen(cli->line, CLI_LINESZ) > 0u)
 			{
 				cli->msg_pending = true;
 				cli->msg_count++;
@@ -274,134 +309,239 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart){
 		}
 		else if(cli->c == '\n')
 		{
-			// ignore \r
+			/* Ignore line-feed. Carriage-return terminates CLI commands. */
 		}
-		else if(cli->c == 127)
+		else if((cli->c == 127u) || (cli->c == '\b'))
 		{
-			uint8_t del = 127;
-			if(cli->index != 0)
+			if(cli->index != 0u)
 			{
 				cli->index--;
-				cli->line[cli->index] = ' ';
-				ret = HAL_UART_Transmit_IT(cli->huart, &cli->c, 1);
-				ret = HAL_UART_Transmit_IT(cli->huart, (uint8_t *)&cli->line[cli->index], 1);
-				ret = HAL_UART_Transmit_IT(cli->huart, &del, 1);
+				cli->line[cli->index] = '\0';
 			}
 		}
-		else if(cli->c >= 32 && cli->c <= 126)
+		else if((cli->c >= 32u) && (cli->c <= 126u))
 		{
-			if(cli->index != CLI_LINESZ - 1)
+			if(cli->index < (CLI_LINESZ - 1u))
 			{
-				cli->line[cli->index++] = cli->c;
-				ret = HAL_UART_Transmit_IT(cli->huart, &cli->c, 1);
+				cli->line[cli->index++] = (char)cli->c;
 			}
 		}
-		ret = HAL_UART_Receive_IT(cli->huart, &cli->c, 1);
+
+		ret = HAL_UART_Receive_IT(cli->huart, (uint8_t *)&cli->c, 1);
 		app.cli_fault = (ret != HAL_OK);
 	}
 }
+
 
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
 	extern app_data_t app;
 	canbus_t *canbus = &app.board.canbus;
 	canbus_packet_t *rx_packet = &canbus->rx_packet;
     ams_t *ams = &app.board.ams;
-	CAN_RxHeaderTypeDef rx_header;
+	cm200_t *cm200 = &app.board.cm200;
 
-    // See ECU_AMS_CANBUS_Protocol.xlsx
-    ams_data_packet_t const ams_data_dest[] = {
-    		{0,  &ams->state,             &ams->air_state,         &ams->current},
-			{1,  &ams->imd_ok,            &ams->imd_status,        &ams->imd_duty},
-			{2,  &ams->max_temp,          &ams->min_volt,          &ams->max_volt},
-    		{3,  &ams->segs[0].volts[0],  &ams->segs[0].volts[1],  &ams->segs[0].volts[2]},
-			{4,  &ams->segs[0].volts[3],  &ams->segs[0].volts[4],  &ams->segs[0].volts[5]},
-			{5,  &ams->segs[0].volts[6],  &ams->segs[0].volts[7],  &ams->segs[0].volts[8]},
-			{6,  &ams->segs[0].volts[9],  &ams->segs[0].volts[10], &ams->segs[0].volts[11]},
-			{7,  &ams->segs[0].volts[12], &ams->segs[0].volts[13], NULL},
-			{8,  &ams->segs[1].volts[0],  &ams->segs[1].volts[1],  &ams->segs[1].volts[2]},
-			{9,  &ams->segs[1].volts[3],  &ams->segs[1].volts[4],  &ams->segs[1].volts[5]},
-			{10, &ams->segs[1].volts[6],  &ams->segs[1].volts[7],  &ams->segs[1].volts[8]},
-			{11, &ams->segs[1].volts[9],  &ams->segs[1].volts[10], &ams->segs[1].volts[11]},
-			{12, &ams->segs[1].volts[12], &ams->segs[1].volts[13], NULL},
-			{13, &ams->segs[2].volts[0],  &ams->segs[2].volts[1],  &ams->segs[2].volts[2]},
-			{14, &ams->segs[2].volts[3],  &ams->segs[2].volts[4],  &ams->segs[2].volts[5]},
-			{15, &ams->segs[2].volts[6],  &ams->segs[2].volts[7],  &ams->segs[2].volts[8]},
-			{16, &ams->segs[2].volts[9],  &ams->segs[2].volts[10], &ams->segs[2].volts[11]},
-			{17, &ams->segs[2].volts[12], &ams->segs[2].volts[13], NULL},
-			{18, &ams->segs[3].volts[0],  &ams->segs[3].volts[1],  &ams->segs[3].volts[2]},
-			{19, &ams->segs[3].volts[3],  &ams->segs[3].volts[4],  &ams->segs[3].volts[5]},
-			{20, &ams->segs[3].volts[6],  &ams->segs[3].volts[7],  &ams->segs[3].volts[8]},
-			{21, &ams->segs[3].volts[9],  &ams->segs[3].volts[10], &ams->segs[3].volts[11]},
-			{22, &ams->segs[3].volts[12], &ams->segs[3].volts[13], NULL},
-			{23, &ams->segs[4].volts[0],  &ams->segs[4].volts[1],  &ams->segs[4].volts[2]},
-			{24, &ams->segs[4].volts[3],  &ams->segs[4].volts[4],  &ams->segs[4].volts[5]},
-			{25, &ams->segs[4].volts[6],  &ams->segs[4].volts[7],  &ams->segs[4].volts[8]},
-			{26, &ams->segs[4].volts[9],  &ams->segs[4].volts[10], &ams->segs[4].volts[11]},
-			{27, &ams->segs[4].volts[12], &ams->segs[4].volts[13], NULL},
-			{28, &ams->segs[0].temps[0],  &ams->segs[0].temps[1],  &ams->segs[0].temps[2]},
-			{29, &ams->segs[0].temps[3],  &ams->segs[0].temps[4],  &ams->segs[0].temps[5]},
-			{30, &ams->segs[0].temps[6],  &ams->segs[0].temps[7],  &ams->segs[0].temps[8]},
-			{31, &ams->segs[0].temps[9],  &ams->segs[0].temps[10], &ams->segs[0].temps[11]},
-			{32, &ams->segs[0].temps[12], &ams->segs[0].temps[13], &ams->segs[0].temps[14]},
-			{33, &ams->segs[0].temps[15], &ams->segs[0].temps[16], NULL},
-			{34, &ams->segs[1].temps[0],  &ams->segs[1].temps[1],  &ams->segs[1].temps[2]},
-			{35, &ams->segs[1].temps[3],  &ams->segs[1].temps[4],  &ams->segs[1].temps[5]},
-			{36, &ams->segs[1].temps[6],  &ams->segs[1].temps[7],  &ams->segs[1].temps[8]},
-			{37, &ams->segs[1].temps[9],  &ams->segs[1].temps[10], &ams->segs[1].temps[11]},
-			{38, &ams->segs[1].temps[12], &ams->segs[1].temps[13], &ams->segs[1].temps[14]},
-			{39, &ams->segs[1].temps[15], &ams->segs[1].temps[16], NULL},
-			{40, &ams->segs[2].temps[0],  &ams->segs[2].temps[1],  &ams->segs[2].temps[2]},
-			{41, &ams->segs[2].temps[3],  &ams->segs[2].temps[4],  &ams->segs[2].temps[5]},
-			{42, &ams->segs[2].temps[6],  &ams->segs[2].temps[7],  &ams->segs[2].temps[8]},
-			{43, &ams->segs[2].temps[9],  &ams->segs[2].temps[10], &ams->segs[2].temps[11]},
-			{44, &ams->segs[2].temps[12], &ams->segs[2].temps[13], &ams->segs[2].temps[14]},
-			{45, &ams->segs[2].temps[15], &ams->segs[2].temps[16], NULL},
-			{46, &ams->segs[3].temps[0],  &ams->segs[3].temps[1],  &ams->segs[3].temps[2]},
-			{47, &ams->segs[3].temps[3],  &ams->segs[3].temps[4],  &ams->segs[3].temps[5]},
-			{48, &ams->segs[3].temps[6],  &ams->segs[3].temps[7],  &ams->segs[3].temps[8]},
-			{49, &ams->segs[3].temps[9],  &ams->segs[3].temps[10], &ams->segs[3].temps[11]},
-			{50, &ams->segs[3].temps[12], &ams->segs[3].temps[13], &ams->segs[3].temps[14]},
-			{51, &ams->segs[3].temps[15], &ams->segs[3].temps[16], NULL},
-			{52, &ams->segs[4].temps[0],  &ams->segs[4].temps[1],  &ams->segs[4].temps[2]},
-			{53, &ams->segs[4].temps[3],  &ams->segs[4].temps[4],  &ams->segs[4].temps[5]},
-			{54, &ams->segs[4].temps[6],  &ams->segs[4].temps[7],  &ams->segs[4].temps[8]},
-			{55, &ams->segs[4].temps[9],  &ams->segs[4].temps[10], &ams->segs[4].temps[11]},
-			{56, &ams->segs[4].temps[12], &ams->segs[4].temps[13], &ams->segs[4].temps[14]},
-			{57, &ams->segs[4].temps[15], &ams->segs[4].temps[16], NULL},
-			{58, &ams->fans[0],           &ams->fans[1],           &ams->fans[2]},
-			{59, &ams->fans[3],           &ams->fans[4],           &ams->fans[5]},
-			{60, &ams->fans[6],           &ams->fans[7],           &ams->fans[8]},
-			{61, &ams->fans[9],           NULL,                    NULL}
-    };
+    if((canbus == NULL) || (canbus->hcan == NULL) || (hcan != canbus->hcan))
+    {
+        return;
+    }
 
-	for (uint8_t i = 0; i < 8; i++) rx_packet->data[i] = 0x00;
-	rx_header.ExtId = 0;
-	rx_header.StdId = 0;
-	rx_header.IDE = 0;
-	HAL_CAN_GetRxMessage(canbus->hcan, CAN_RX_FIFO0, &rx_header, rx_packet->data);
-	rx_packet->id = rx_header.StdId;
-	if(rx_packet->id == ECU_CANBUS_ID && rx_header.IDE == CAN_ID_STD)
-	{
-		uint16_t header = ((uint16_t)rx_packet->data[0] << 8) | rx_packet->data[1];
-		uint16_t data0  = ((uint16_t)rx_packet->data[2] << 8) | rx_packet->data[3];
-		uint16_t data1  = ((uint16_t)rx_packet->data[4] << 8) | rx_packet->data[5];
-		uint16_t data2  = ((uint16_t)rx_packet->data[6] << 8) | rx_packet->data[7];
-		ams_data_packet_t packet_locs = ams_data_dest[header];
-		uint16_t packet_header = packet_locs.header;
-		if(packet_header == header)
-		{
-			if(packet_locs.d0) *packet_locs.d0 = data0;
-			if(packet_locs.d1) *packet_locs.d1 = data1;
-			if(packet_locs.d2) *packet_locs.d2 = data2;
-		}
-	}
+    const bool dwt_timing = stm32f767_cycle_counter_available();
+    const uint32_t isr_start_cycles = dwt_timing ?
+        stm32f767_cycle_counter_read() : 0u;
+    uint8_t received = 0u;
+
+    /* Drain a bounded number of frames per callback.  This prevents a busy bus
+     * from monopolizing interrupt time while avoiding one-callback/one-frame
+     * backlog growth.  Target diagnostics record both WCET and whether the
+     * bound was exhausted with additional frames still pending. */
+    for(received = 0u;
+        (received < CANBUS_RX_ISR_BUDGET) &&
+        (HAL_CAN_GetRxFifoFillLevel(canbus->hcan, CAN_RX_FIFO0) != 0u);
+        received++)
+    {
+        CAN_RxHeaderTypeDef rx_header = {0};
+        uint8_t rx_data[DATALEN] = {0};
+        uint32_t std_id;
+        bool is_standard;
+        bool is_data;
+        bool known_ams;
+        bool known_cm200;
+        bool parsed = false;
+
+        if(HAL_CAN_GetRxMessage(canbus->hcan, CAN_RX_FIFO0, &rx_header, rx_data) != HAL_OK)
+        {
+            app.canbus_rx_fault = true;
+            break;
+        }
+
+        is_standard = (rx_header.IDE == CAN_ID_STD);
+        is_data = (rx_header.RTR == CAN_RTR_DATA);
+        std_id = rx_header.StdId;
+        known_ams = (is_standard && ams_is_known_can_id(std_id));
+        known_cm200 = (is_standard && cm200_is_known_can_id(std_id));
+
+        rx_packet->id = is_standard ? std_id : rx_header.ExtId;
+        memcpy(rx_packet->data, rx_data, sizeof(rx_packet->data));
+
+        if(!is_data)
+        {
+            canbus->rx_remote_count++;
+            if(known_ams)
+            {
+                ams->bad_rx_count++;
+                ams_invalidate_can_frame(ams, std_id);
+            }
+            if(known_cm200)
+            {
+                cm200->bad_rx_count++;
+                cm200_invalidate_can_frame(cm200, std_id);
+            }
+            if(known_ams || known_cm200)
+            {
+                canbus->rx_malformed_count++;
+            }
+            else
+            {
+                canbus->rx_ignored_count++;
+            }
+            ecu_data_logger_can_rx_isr(is_standard ? std_id : rx_header.ExtId,
+                                       is_standard, true,
+                                       (uint8_t)rx_header.DLC, rx_data,
+                                       known_ams, known_cm200, false);
+            continue;
+        }
+
+        if(known_ams)
+        {
+            parsed = ams_parse_can_frame(ams,
+                                         std_id,
+                                         true,
+                                         (uint8_t)rx_header.DLC,
+                                         rx_data,
+                                         HAL_GetTick());
+        }
+        else if(known_cm200)
+        {
+            parsed = cm200_parse_can_frame(cm200,
+                                           std_id,
+                                           true,
+                                           (uint8_t)rx_header.DLC,
+                                           rx_data,
+                                           HAL_GetTick());
+        }
+
+        ecu_data_logger_can_rx_isr(is_standard ? std_id : rx_header.ExtId,
+                                   is_standard, false,
+                                   (uint8_t)rx_header.DLC, rx_data,
+                                   known_ams, known_cm200, parsed);
+
+        if(parsed)
+        {
+            canbus->rx_accepted_count++;
+        }
+        else if(known_ams || known_cm200)
+        {
+            canbus->rx_malformed_count++;
+        }
+        else
+        {
+            canbus->rx_ignored_count++;
+        }
+    }
+
+    if(app.can_rx_isr_callback_count != UINT32_MAX)
+    {
+        app.can_rx_isr_callback_count++;
+    }
+    if((received >= CANBUS_RX_ISR_BUDGET) &&
+       (HAL_CAN_GetRxFifoFillLevel(canbus->hcan, CAN_RX_FIFO0) != 0u) &&
+       (app.can_rx_isr_budget_exhaust_count != UINT32_MAX))
+    {
+        app.can_rx_isr_budget_exhaust_count++;
+    }
+    if(dwt_timing)
+    {
+        const uint32_t elapsed =
+            (uint32_t)(stm32f767_cycle_counter_read() - isr_start_cycles);
+        app.can_rx_isr_last_cycles = elapsed;
+        if(elapsed > app.can_rx_isr_max_cycles)
+        {
+            app.can_rx_isr_max_cycles = elapsed;
+        }
+    }
+}
+
+void HAL_CAN_ErrorCallback(CAN_HandleTypeDef *hcan)
+{
+    extern app_data_t app;
+
+    if((app.board.canbus.hcan == NULL) || (hcan != app.board.canbus.hcan))
+    {
+        return;
+    }
+
+    app.can_error_code = HAL_CAN_GetError(hcan);
+    /* HAL accumulates ErrorCode until explicitly reset. Consume the current
+     * callback's vector now so a later RX-only callback cannot replay an old
+     * mailbox-terminal TX bit against a new pending command. */
+    (void)HAL_CAN_ResetError(hcan);
+    canbus_tx_error_isr(&app.board.canbus, app.can_error_code);
+    app.canbus_hw_fault = true;
+    if((app.can_error_code & HAL_CAN_ERROR_RX_FOV0) != 0u)
+    {
+        app.can_rx_overrun_count++;
+        app.canbus_rx_fault = true;
+    }
+}
+
+void HAL_CAN_TxMailbox0CompleteCallback(CAN_HandleTypeDef *hcan)
+{
+    extern app_data_t app;
+    if(hcan == app.board.canbus.hcan)
+        canbus_tx_complete_isr(&app.board.canbus, CAN_TX_MAILBOX0);
+}
+
+void HAL_CAN_TxMailbox1CompleteCallback(CAN_HandleTypeDef *hcan)
+{
+    extern app_data_t app;
+    if(hcan == app.board.canbus.hcan)
+        canbus_tx_complete_isr(&app.board.canbus, CAN_TX_MAILBOX1);
+}
+
+void HAL_CAN_TxMailbox2CompleteCallback(CAN_HandleTypeDef *hcan)
+{
+    extern app_data_t app;
+    if(hcan == app.board.canbus.hcan)
+        canbus_tx_complete_isr(&app.board.canbus, CAN_TX_MAILBOX2);
+}
+
+void HAL_CAN_TxMailbox0AbortCallback(CAN_HandleTypeDef *hcan)
+{
+    extern app_data_t app;
+    if(hcan == app.board.canbus.hcan)
+        canbus_tx_abort_isr(&app.board.canbus, CAN_TX_MAILBOX0);
+}
+
+void HAL_CAN_TxMailbox1AbortCallback(CAN_HandleTypeDef *hcan)
+{
+    extern app_data_t app;
+    if(hcan == app.board.canbus.hcan)
+        canbus_tx_abort_isr(&app.board.canbus, CAN_TX_MAILBOX1);
+}
+
+void HAL_CAN_TxMailbox2AbortCallback(CAN_HandleTypeDef *hcan)
+{
+    extern app_data_t app;
+    if(hcan == app.board.canbus.hcan)
+        canbus_tx_abort_isr(&app.board.canbus, CAN_TX_MAILBOX2);
 }
 
 void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim) {
 	extern app_data_t app;
 	flow_sensor_t *cool_flow = &app.board.cool_flow;
 
-	if(htim->Instance == cool_flow->htim->Instance){
+	if((htim != NULL) && (cool_flow->htim != NULL) &&
+	   (htim->Instance == cool_flow->htim->Instance)){
 		flow_sensor_read(cool_flow);
 	}
 }

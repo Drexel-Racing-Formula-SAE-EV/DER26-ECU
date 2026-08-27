@@ -19,16 +19,34 @@
 */
 void bppc_task_fn(void *arg);
 
+static StaticTask_t bppc_task_tcb;
+static StackType_t bppc_task_stack[ECU_STACK_BPPC_WORDS];
+static TaskHandle_t bppc_task_handle = NULL;
+
 TaskHandle_t bppc_task_start(app_data_t *data)
 {
-   TaskHandle_t handle;
-   xTaskCreate(bppc_task_fn, "BPPC task", 128, (void *)data, BPPC_PRIO, &handle);
-   return handle;
+    if(data == NULL)
+    {
+        return NULL;
+    }
+
+    if(bppc_task_handle == NULL)
+    {
+        bppc_task_handle = xTaskCreateStatic(bppc_task_fn,
+            "BPPC task", ECU_STACK_BPPC_WORDS, (void *)data, BPPC_PRIO,
+            bppc_task_stack, &bppc_task_tcb);
+    }
+    return bppc_task_handle;
 }
 
 void bppc_task_fn(void *arg)
 {
     app_data_t *data = (app_data_t *)arg;
+    if(data == NULL)
+    {
+        vTaskDelete(NULL);
+        return;
+    }
 	   
     uint32_t entry;
 	bool brakesEnganged = false;
@@ -38,10 +56,11 @@ void bppc_task_fn(void *arg)
 	for(;;)
 	{
 		entry = osKernelGetTickCount();
+		data->bppc_heartbeat_tick = entry;
 
 		// EV.4.7.1 (2024)
-		brakesEnganged = (data->brake > BPPC_BSE_THRESH);
-		throttleEngaged = (data->throttle > BPPC_APPS_H_THRESH);
+		brakesEnganged   = (data->brake > BPPC_BSE_THRESH);
+		throttleEngaged  = (data->throttle > BPPC_APPS_H_THRESH);
 		throttleReleased = (data->throttle < BPPC_APPS_L_THRESH);
 
 		if(data->bppc_fault)
@@ -50,14 +69,14 @@ void bppc_task_fn(void *arg)
 			if(throttleReleased)
 			{
 				data->bppc_fault = false;
-				set_ecu_ok(1);
+//				set_ecu_ok(1);
 			}
 		}
 		else if(brakesEnganged && throttleEngaged)
 		{
 			// EV.4.7.2 (2024)
 			data->bppc_fault = true;
-			set_ecu_ok(0);
+//			set_ecu_ok(0);
 		}
 
 		osDelayUntil(entry + (1000 / BPPC_FREQ));

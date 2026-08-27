@@ -17,6 +17,7 @@
   */
 /* USER CODE END Header */
 #include "fatfs.h"
+#include "app.h"
 
 uint8_t retUSER;    /* Return value for USER */
 char USERPath[4];   /* USER logical drive path */
@@ -45,7 +46,26 @@ void MX_FATFS_Init(void)
 DWORD get_fattime(void)
 {
   /* USER CODE BEGIN get_fattime */
-  return 0;
+  RTC_TimeTypeDef time = {0};
+  RTC_DateTypeDef date = {0};
+  RTC_HandleTypeDef *rtc = app.board.stm32f767.hrtc;
+  if((rtc == NULL) ||
+     (HAL_RTC_GetTime(rtc, &time, RTC_FORMAT_BIN) != HAL_OK) ||
+     (HAL_RTC_GetDate(rtc, &date, RTC_FORMAT_BIN) != HAL_OK))
+  {
+    /* FAT's earliest representable date. */
+    return (DWORD)((1u << 21u) | (1u << 16u));
+  }
+
+  uint32_t year = 2000u + (uint32_t)date.Year;
+  if(year < 1980u) year = 1980u;
+  if(year > 2107u) year = 2107u;
+  return (DWORD)(((year - 1980u) << 25u) |
+                 ((uint32_t)date.Month << 21u) |
+                 ((uint32_t)date.Date << 16u) |
+                 ((uint32_t)time.Hours << 11u) |
+                 ((uint32_t)time.Minutes << 5u) |
+                 ((uint32_t)time.Seconds / 2u));
   /* USER CODE END get_fattime */
 }
 

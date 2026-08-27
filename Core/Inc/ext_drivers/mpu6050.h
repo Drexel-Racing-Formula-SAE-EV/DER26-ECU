@@ -17,7 +17,7 @@
 #define REG_SMPLRT_DIV 0x19
 #define REG_CONFIG_GYRO 27
 #define REG_CONFIG_ACC 28
-#define REG_USR_CTRL 107
+#define REG_PWR_MGMT_1 0x6B
 #define REG_DATA 59
 #define ACCEL_XOUT_H 0x3B
 #define GYRO_XOUT_H_REG 0x43

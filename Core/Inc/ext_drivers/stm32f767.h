@@ -13,40 +13,51 @@
 #define __STM32F767_H_
 
 #include <stdint.h>
+#include <stdbool.h>
 #include "stm32f7xx_hal.h"
 #include "cmsis_os.h"
 
 typedef struct {
-	ADC_HandleTypeDef hadc1;
-	ADC_HandleTypeDef hadc2;
-	ADC_HandleTypeDef hadc3;
+	ADC_HandleTypeDef *hadc1;
+	ADC_HandleTypeDef *hadc2;
+	ADC_HandleTypeDef *hadc3;
 
-	CAN_HandleTypeDef hcan1;
+	CAN_HandleTypeDef *hcan1;
 
-	I2C_HandleTypeDef hi2c2;
+	I2C_HandleTypeDef *hi2c2;
 
-	RTC_HandleTypeDef hrtc;
+	RTC_HandleTypeDef *hrtc;
 
-	SPI_HandleTypeDef hspi6;
+	SPI_HandleTypeDef *hspi6;
 
-	TIM_HandleTypeDef htim3;
-	TIM_HandleTypeDef htim4;
-	TIM_HandleTypeDef htim5;
+	TIM_HandleTypeDef *htim3;
+	TIM_HandleTypeDef *htim4;
+	TIM_HandleTypeDef *htim5;
 
-	UART_HandleTypeDef huart7;
-	UART_HandleTypeDef huart3;
+	UART_HandleTypeDef *huart7;
+	UART_HandleTypeDef *huart3;
 
 	osMutexId_t can1_mutex;
+	osMutexId_t adc3_mutex;
 	osMutexId_t i2c2_mutex;
 	osMutexId_t spi6_mutex;
 	osMutexId_t	uart3_mutex;
 	osMutexId_t	uart7_mutex;
 
 	CAN_TxHeaderTypeDef can1_txheader;
+	bool initialized;
 } stm32f767_t;
 
 void stm32f767_init(stm32f767_t *dev);
 uint16_t stm32f767_adc_read(ADC_HandleTypeDef *hadc);
+HAL_StatusTypeDef stm32f767_adc_read_checked(ADC_HandleTypeDef *hadc, uint16_t *count);
 HAL_StatusTypeDef stm32f767_adc_switch_channel(ADC_HandleTypeDef *hadc, uint32_t channel);
+
+/* Cortex-M7 DWT cycle counter used for target-only WCET evidence. The counter
+ * is free-running and wraps naturally at 32 bits. */
+bool stm32f767_cycle_counter_init(void);
+bool stm32f767_cycle_counter_available(void);
+uint32_t stm32f767_cycle_counter_read(void);
+uint32_t stm32f767_cycles_to_us(uint32_t cycles);
 
 #endif

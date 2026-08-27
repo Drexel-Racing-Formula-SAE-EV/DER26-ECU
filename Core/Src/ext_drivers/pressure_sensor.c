@@ -17,14 +17,24 @@
 
 void pressure_sensor_init(pressure_sensor_t *sensor, uint16_t min, uint16_t max, ADC_HandleTypeDef *handle, uint8_t channel)
 {
+	if(sensor == NULL)
+	{
+		return;
+	}
 	sensor->min = min;
 	sensor->max = max;
 	sensor->handle = handle;
 	sensor->channel = channel;
+	sensor->count = 0u;
+	sensor->percent = 0.0f;
 }
 
 float pressure_sensor_get_percent(pressure_sensor_t *root)
 {
+	if((root == NULL) || (root->min == root->max))
+	{
+		return 0.0f;
+	}
 	float percent = (float)map(root->count, root->min, root->max, 0, 100);
 	if(percent > 100.0)
 	{
@@ -44,17 +54,25 @@ uint8_t pressure_sensor_check_implausibility(float L, float R, int thresh, int c
 {
     static unsigned int counts = 0;
 
-	// Check if APPS1 and APPS2 are more than 10% different
+	// Check if BSE1 and BSE2 are more than 10% different
 	if(fabs(L - R) > thresh)
 	{
 		counts++;
 		// If there are consecutive errors for more than 100ms, error
-		return counts <= count;
+		return counts <= (uint32_t)count;
 	}
 	else
 	{
 		// If potentiometers are within spec, reset count
 		counts = 0;
+		return 1;
+	}
+}
+
+uint8_t pressure_sensor_in_range(float count, int max_thresh, int min_thresh){
+	if(count > max_thresh || count < min_thresh){
+		return 0;
+	} else {
 		return 1;
 	}
 }

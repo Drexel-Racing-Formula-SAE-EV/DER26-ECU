@@ -16,13 +16,19 @@
 
 void cli_device_init(cli_t *dev, UART_HandleTypeDef *huart)
 {
-    dev->huart = huart;
-    dev->index = 0;
+	if(dev == NULL)
+	{
+		return;
+	}
+	dev->huart = huart;
+	dev->c = 0u;
+	dev->index = 0;
     dev->msg_pending = false;
     dev->msg_count = 0;
     dev->msg_proc = 0;
-    dev->msg_valid = 0;
-    dev->ret = 0;
+	dev->msg_valid = 0;
+	dev->ret = 0;
+	memset(dev->line, 0, sizeof(dev->line));
 }
 
 int cli_printline(cli_t *dev, char *line)
@@ -30,28 +36,37 @@ int cli_printline(cli_t *dev, char *line)
 	static char nl[] = "\r\n";
 	HAL_StatusTypeDef ret = 0;
 
+	if((dev == NULL) || (line == NULL) || (dev->huart == NULL))
+	{
+		return HAL_ERROR;
+	}
+
 	if(xPortIsInsideInterrupt())
 	{
-		ret |= HAL_UART_Transmit_IT(dev->huart, (uint8_t *)line, strlen(line));
-		ret |= HAL_UART_Transmit_IT(dev->huart, (uint8_t*)nl, strlen(nl));
+		return HAL_BUSY;
 	}
-	else
-	{
-		ret |= HAL_UART_Transmit(dev->huart, (uint8_t *)line, strlen(line), 100);
-		ret |= HAL_UART_Transmit(dev->huart, (uint8_t *)nl, strlen(nl), 100);
-	}
+
+	ret |= HAL_UART_Transmit(dev->huart, (uint8_t *)line, strlen(line), 100);
+	ret |= HAL_UART_Transmit(dev->huart, (uint8_t *)nl, strlen(nl), 100);
 	return ret;
 }
 
 int tokenize(char *s, char *toks[], int maxtoks, char *delim)
 {
-	int i = 0;
+	int count = 0;
+	char *tok;
 
-	toks[i] = (char *)strtok(s, delim);
-	while(toks[i++] != NULL)
+	if((s == NULL) || (toks == NULL) || (delim == NULL) || (maxtoks <= 0))
 	{
-		if(i >= maxtoks - 1) toks[i] = NULL;
-		else toks[i] = (char *)strtok(NULL, delim);
+		return 0;
 	}
-	return i - 1;
+
+	tok = strtok(s, delim);
+	while((tok != NULL) && (count < (maxtoks - 1)))
+	{
+		toks[count++] = tok;
+		tok = strtok(NULL, delim);
+	}
+	toks[count] = NULL;
+	return count;
 }

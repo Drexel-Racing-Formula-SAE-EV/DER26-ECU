@@ -11,8 +11,9 @@
 
 #include "tasks/rtd_task.h"
 #include "main.h"
+#include "ecu_config.h"
+#include "ext_drivers/ecu_safety.h"
 
-#define TRIP_DELAY 100
 /**
 * @brief Actual RTD task function
 *
@@ -20,85 +21,94 @@
 */
 void rtd_task_fn(void *arg);
 
+static StaticTask_t rtd_task_tcb;
+static StackType_t rtd_task_stack[ECU_STACK_RTD_WORDS];
+static TaskHandle_t rtd_task_handle = NULL;
+
 TaskHandle_t rtd_task_start(app_data_t *data)
 {
-   TaskHandle_t handle;
-   xTaskCreate(rtd_task_fn, "RTD task", 128, (void *)data, 20, &handle);
-   return handle;
+    if(data == NULL)
+    {
+        return NULL;
+    }
+
+    if(rtd_task_handle == NULL)
+    {
+        rtd_task_handle = xTaskCreateStatic(rtd_task_fn,
+            "RTD task", ECU_STACK_RTD_WORDS, (void *)data, RTD_PRIO,
+            rtd_task_stack, &rtd_task_tcb);
+    }
+    return rtd_task_handle;
 }
 
 void rtd_task_fn(void *arg)
 {
     app_data_t *data = (app_data_t *)arg;
+    if(data == NULL)
+    {
+        vTaskDelete(NULL);
+        return;
+    }
     uint32_t entry;
+    uint32_t buzz_start_tick = 0u;
+    ecu_discrete_filter_t tsal_filter = {0};
+    ecu_discrete_filter_t motor_ok_filter = {0};
 
-	for(;;)
-	{
+    ecu_discrete_filter_init(&tsal_filter);
+    ecu_discrete_filter_init(&motor_ok_filter);
+
+    for(;;)
+    {
         entry = osKernelGetTickCount();
+        data->rtd_heartbeat_tick = entry;
 
-		data->tsal = HAL_GPIO_ReadPin(TSAL_HV_SIG_GPIO_Port, TSAL_HV_SIG_Pin);
-		data->rtd_button = HAL_GPIO_ReadPin(RTD_Go_GPIO_Port, RTD_Go_Pin);
-		data->cascadia_ok = !HAL_GPIO_ReadPin(MTR_Ok_GPIO_Port, MTR_Ok_Pin);
-		
-		// state machine (as described in Teams -> Electrical - Firmware -> Files -> RTD_FSM.pptx)
-		switch(data->rtd_mode)
-		{
-			case RTD_AWAIT_TSAL:
-				if(data->tsal)
-				{
-					data->rtd_mode = RTD_AWAIT_BUTTON_FALSE;
-				}
-				break;
-			
-			case RTD_AWAIT_BUTTON_FALSE:
-				if(!data->rtd_button)
-				{
-					data->rtd_mode = RTD_AWAIT_CONDITIONS;
-				}
+        const bool tsal_raw = (HAL_GPIO_ReadPin(TSAL_HV_SIG_GPIO_Port, TSAL_HV_SIG_Pin) == GPIO_PIN_SET);
+        const bool button_raw = (HAL_GPIO_ReadPin(RTD_Go_GPIO_Port, RTD_Go_Pin) == GPIO_PIN_SET);
+        const bool mtr_ok_raw = (HAL_GPIO_ReadPin(MTR_Ok_GPIO_Port, MTR_Ok_Pin) == GPIO_PIN_SET);
+        const bool tsal_decoded = ECU_TSAL_ACTIVE_HIGH ? tsal_raw : !tsal_raw;
+        const bool motor_ok_decoded = ECU_MTR_OK_ACTIVE_LOW ? !mtr_ok_raw : mtr_ok_raw;
+        /* Loss is immediate; assertion requires three consecutive 50 Hz
+         * samples so startup/glitch edges cannot arm RTD. */
+        data->tsal = !ecu_discrete_fault_update(&tsal_filter,
+                                                 !tsal_decoded,
+                                                 3u);
+        data->rtd_button = ECU_RTD_BUTTON_ACTIVE_LOW ? !button_raw : button_raw;
+        data->cascadia_ok = !ecu_discrete_fault_update(&motor_ok_filter,
+                                                        !motor_ok_decoded,
+                                                        3u);
 
-				if(!data->tsal)
-				{
-					data->rtd_mode = RTD_AWAIT_TSAL;
-				}
-				break;
+        const ecu_rtd_inputs_t inputs = {
+            .tsal = data->tsal,
+            .rtd_button = data->rtd_button,
+            .cascadia_ok = data->cascadia_ok,
+            .brakelight = data->brakelight,
+            .faults = {
+                .hard_fault = data->hard_fault,
+                .apps_fault = data->apps_fault,
+                .bse_fault = data->bse_fault,
+                .bppc_fault = data->bppc_fault,
+                .ams_fault = data->ams_fault,
+                .canbus_fault = data->canbus_fault,
+                .canbus_rx_fault = data->canbus_rx_fault,
+                .canbus_tx_fault = data->canbus_tx_fault,
+                .imd_fail = data->imd_fail,
+                .bms_fail = data->bms_fail,
+                .bspd_fail = data->bspd_fail,
+                .cm200_fault = (data->cm200_fault || !data->cm200_ready),
+            },
+        };
 
-			case RTD_AWAIT_CONDITIONS:
-				if(data->cascadia_ok && data->brakelight && data->rtd_button)
-				{
-					set_buzzer(1);
-					osDelay(3000);
-					set_buzzer(0);
-					data->rtd_mode = RTD_ENABLED;
-				}
+        const ecu_rtd_step_t step = ecu_rtd_step(data->rtd_mode, buzz_start_tick, &inputs, entry);
+        data->rtd_mode = step.state;
+        buzz_start_tick = step.buzz_start_tick;
+        set_buzzer(step.buzzer_on);
 
-				if(!data->tsal)
-				{
-					data->rtd_mode = RTD_AWAIT_TSAL;
-				}
-				break;
+        if(step.trip_pulse_requested)
+        {
+            /* ERROR task is the sole owner of shutdown outputs. */
+            data->rtd_trip_pulse_requested = true;
+        }
 
-			case RTD_ENABLED:
-				if(!data->cascadia_ok || !data->rtd_button)
-				{
-					data->rtd_mode = RTD_AWAIT_CONDITIONS;
-				}
-
-				if(!data->tsal)
-				{
-					data->rtd_mode = RTD_AWAIT_TSAL;
-				}
-
-				// for any state transition out of RTD_ENABLE w/o a hard fault
-				if (data->rtd_mode != RTD_ENABLED)
-				{
-					override_ecu_ok(0);
-					apply_ecu_ok_override(1);
-					osDelay(TRIP_DELAY);
-					apply_ecu_ok_override(0);
-				}
-
-				break;
-		}
-        osDelayUntil(entry + (1000 / APPS_FREQ));
-	}
+        osDelayUntil(entry + (1000 / RTD_FREQ));
+    }
 }

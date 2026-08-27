@@ -12,10 +12,26 @@
 #ifndef __CANBUS_H_
 #define __CANBUS_H_
 
+#include <stdbool.h>
+
 #include "cmsis_os.h"
+#include "FreeRTOS.h"
+#include "queue.h"
 #include "stm32f7xx_hal.h"
+#include "power/ecu_torque_clamp.h"
 
 #define DATALEN 8
+#define CANBUS_TX_TIMEOUT_MS 2u
+#if DER26_CAN_BITRATE_KBPS == 500u
+#define CANBUS_CM200_COMMIT_WAIT_MS 2u
+#else
+#define CANBUS_CM200_COMMIT_WAIT_MS 4u
+#endif
+#define CANBUS_AMS_FEEDBACK_PERIOD_MS 500u
+#define CANBUS_TX_QUEUE_LENGTH 1u
+#define CANBUS_RX_ISR_BUDGET   8u
+#define CANBUS_CM200_TX_COMPLETE_TIMEOUT_MS 4u
+#define CANBUS_TX_ABORT_RECONCILE_MS 2u
 
 typedef struct {
     uint32_t id;
@@ -23,13 +39,65 @@ typedef struct {
 } canbus_packet_t;
 
 typedef struct {
+    canbus_packet_t packet;
+    ecu_torque_command_contract_t torque_contract;
+    bool torque_contract_valid;
+} canbus_tx_request_t;
+
+typedef struct {
     CAN_HandleTypeDef *hcan;
     CAN_TxHeaderTypeDef *tx_header;
     uint32_t tx_mailbox;
     canbus_packet_t rx_packet;
-    canbus_packet_t tx_packet;
+    QueueHandle_t tx_queue;
+    StaticQueue_t tx_queue_control;
+    uint8_t tx_queue_storage[CANBUS_TX_QUEUE_LENGTH * sizeof(canbus_tx_request_t)];
+    volatile uint32_t tx_dropped_count;
+    volatile uint32_t tx_replaced_count;
+    volatile uint32_t rx_accepted_count;
+    volatile uint32_t rx_ignored_count;
+    volatile uint32_t rx_malformed_count;
+    volatile uint32_t rx_remote_count;
+    volatile uint32_t feedback_tx_count;
+    volatile uint32_t feedback_tx_deferred_count;
+    volatile uint32_t feedback_tx_error_count;
+    uint32_t feedback_last_tx_tick;
+
+    /* CM200 protected-commit mailbox-wait evidence. The wait is intentionally
+     * bounded/fail-zero; DWT measurements are captured by the CAN task so
+     * bench A/B testing can quantify scheduler duty instead of assuming it. */
+    volatile uint32_t tx_wait_count;
+    volatile uint32_t tx_wait_timeout_count;
+    volatile uint32_t tx_wait_last_cycles;
+    volatile uint32_t tx_wait_max_cycles;
+    volatile uint32_t tx_pending_mailbox_mask;
+    volatile uint32_t tx_complete_mailbox_mask;
+    volatile uint32_t tx_abort_mailbox_mask;
+    volatile uint32_t tx_complete_count;
+    volatile uint32_t tx_abort_count;
+    volatile uint32_t tx_complete_timeout_count;
+    volatile uint32_t tx_unexpected_callback_count;
+    /* Latched when a bounded abort-reconcile window expires without a
+     * hardware terminal callback.  Once set, no further frame may be
+     * enqueued because the physical outcome / CM200 rolling counter is
+     * unknowable to the caller.  Cleared only by device reinitialization. */
+    volatile bool tx_outcome_uncertain_latched;
+    bool filters_configured;
+    bool started;
 } canbus_t;
 
 void canbus_device_init(canbus_t *dev, CAN_HandleTypeDef *hcan, CAN_TxHeaderTypeDef *tx_header);
+HAL_StatusTypeDef canbus_wait_tx_ready(canbus_t *dev, uint32_t timeout_ms);
+HAL_StatusTypeDef canbus_transmit_ready(canbus_t *dev, const canbus_packet_t *packet);
+HAL_StatusTypeDef canbus_transmit_ready_tracked(canbus_t *dev,
+                                                const canbus_packet_t *packet,
+                                                uint32_t *mailbox);
+HAL_StatusTypeDef canbus_wait_tx_complete(canbus_t *dev, uint32_t mailbox,
+                                          uint32_t timeout_ms);
+void canbus_tx_complete_isr(canbus_t *dev, uint32_t mailbox);
+void canbus_tx_abort_isr(canbus_t *dev, uint32_t mailbox);
+void canbus_tx_error_isr(canbus_t *dev, uint32_t error_code);
+HAL_StatusTypeDef canbus_transmit(canbus_t *dev, const canbus_packet_t *packet, uint32_t timeout_ms);
+HAL_StatusTypeDef canbus_queue_tx(canbus_t *dev, const canbus_tx_request_t *request);
 
 #endif

@@ -1,0 +1,5 @@
+#ifndef ECU_PACK_CURRENT_CALIBRATION_H_
+#define ECU_PACK_CURRENT_CALIBRATION_H_
+#include "power/ecu_pack_current_model.h"
+extern const ecu_pack_current_calibration_t g_ecu_pack_current_calibration;
+#endif

@@ -1,138 +1,143 @@
-# DER 2026 ECU Firmware v2.2.0
+# DER26 ECU Firmware
 
-Designed and writen by Cole Bardin (cab572)
+STM32F767ZI + FreeRTOS firmware for the Drexel Electric Racing DER26 vehicle ECU.
 
-Updated: 6/23/2025
+Current source revision in this repository: **v2.10.7** (`DER26-ECU-v2.10.7-SAFETY2-20260827`).
 
-## Platform
+The ECU acquires driver and vehicle inputs, supervises the AMS and CM200 inverter, generates a bounded torque request, controls supporting low-voltage functions such as coolant pumping, and records vehicle/CAN data to SD storage.
 
-### Microcontroller
+> Bench profiles intentionally inhibit propulsion authority. A vehicle-authority build requires explicit evidence gates for hardware interfaces, calibration, timing, CAN behavior, watchdog behavior, RTOS memory, and safe outputs.
 
-STM32F767ZI, an ARM Cortex-M7 based microcontroller. The MCU is on a custom breakout PCB and is running at SYSCLK max of 216 MHz.
+Start with the [documentation index](docs/README.md).
 
-### Environment
+## Repository map
 
-The project can be build and flashed using the STM32CubeIDE. It is an Eclipse based IDE with many added features to improve development on STM boards, such as their IOC file type. This IDE also offers good debugging tools.
+```text
+Core/Src/tasks/        FreeRTOS task entry points and periodic state machines
+Core/Src/power/        pack-current model, torque clamp, residual monitor
+Core/Src/ext_drivers/  board/device adapters, CAN, AMS, CM200, cooling, logger
+Core/Inc/              application interfaces and configuration contracts
+Drivers/               STM32 HAL/CMSIS vendor support
+Middlewares/           FreeRTOS and STM32 middleware
+FATFS/                 FatFs integration for SD logging
+host_tests/            host unit/SIL/stress/sanitizer harness
+ci/                    repository, architecture, and target-build gates
+Tools/                 CAN/log/current-model analysis utilities
+docs/                  maintained firmware and bring-up documentation
+```
 
-[IDE Download Link](https://www.st.com/en/development-tools/stm32cubeide.html)
+See [Code organization](docs/CODE_ORGANIZATION.md) for a maintainer-oriented map.
 
-## Firmware
+## Control and safety boundary
 
-### Architecture
+The ECU does **not** implement low-level motor field/current control. The CM200 remains responsible for inverter/motor control and its internal protections. The ECU produces a bounded torque request only after the software authority chain is satisfied.
 
-The entire program is embedded within the `app_data_t` data structure found in `app.h`. This encapsulates all variables, structs, driver interfaces, etc for the program. An instance of `app_data_t` named `app` lives inside the `app.c` file, and a pointer to `app` is be passed to tasks and functions to handle data access. 
+The high-level path is:
 
-All data structures are typedef'd to simplify the code. Also the terms 'data structure' and 'type' will be used interchangeable. In C, a data structure can be typedef'd into a custom data type for convenience.
+```text
+APPS / brake / protected discretes
+              |
+              v
+      driver-intent tasks
+              |
+              v
+     candidate torque request
+              |
+              +------------------------+
+              |                        |
+              v                        v
+        AMS power authority       CM200 capability/state
+              |                        |
+              +-----------+------------+
+                          v
+                 torque/current clamp
+                          |
+                 final commit-time checks
+                          |
+                          v
+                    bxCAN mailbox
+                          |
+                          v
+                        CM200
+```
 
-The `app_data_t` type contains highest priority data such as fault flags, throttle and brake percentage, etc. The structure also contains a `board_t` data structure.
+Nonzero torque must survive fresh/coherent AMS authority, CM200 state/capability, current-model constraints, discrete safety inputs, and final mailbox-commit checks. Loss of required authority removes nonzero torque permission.
 
-The `board_t` type contains representations of physical devices on the ECU board such as the STM32F7, potentiometers, CANBus transceiver, etc. These devices are represented with their own custom typedef'd data structures.
+Detailed contracts:
 
-The `stm32f767_t` type contain the interfaces for the STM HAL. It holds all the handles, mutexes, and other data types used to interface with the MCU hardware.
+- [Torque-to-pack-current clamp](docs/ECU_TORQUE_TO_PACK_CURRENT_CLAMP.md)
+- [AMS power protocol](docs/ECU_AMS_POWER_PROTOCOL_V2.md)
+- [Torque removal and availability budget](docs/ECU_TORQUE_REMOVAL_AND_AVAILABILITY_BUDGET.md)
+- [CM200 CAN contract and bring-up](docs/CM200_CAN_CONTRACT_AND_BRINGUP.md)
+- [Safety model](docs/SAFETY_MODEL.md)
 
-Data structures like the `poten_t` and `canbus_t` are wrappers around the physical devices on the board. Instances of these structs are stored in the `board` struct for conventient and reliable access.
+## Main application areas
 
-Each RTOS task receives a pointer to the `app_data_t` instance so that they can parse out the required interfaces and data.
+### Driver and vehicle state
 
-For example, the CANBus task would require access to the `canbus_t` instance that was initialized during setup. So it would make sense that the task function declares a local `canbus_t *` that points to the instance stored within the shared `app_data_t` instance.
+`Core/Src/tasks/` contains the APPS, brake, RTD, CAN, cooling, dashboard, CLI, and error-supervision tasks. Input plausibility and authority are kept separate from the final CAN command commit.
 
-### File Organization
+### Battery-power supervision
 
-The base firmware is written in C and uses FreeRTOS middleware. It is a rather standard STM32Cube project layout.
+`Core/Src/power/` contains the pack-current model, calibration interface, torque clamp, and current-residual monitor. The ECU consumes canonical AMS power authority rather than branching on the AMS current-source implementation.
 
-Within the `Core` subdirectory, the `Inc` and `Src` directories contain the header and source code files respectively. These two directories have identical internal structures.
+### CAN and inverter supervision
 
-Inside of both `Inc` and `Src`, lives the `ext_drivers` and `tasks` subdirectories. Along with `main.c/h`, `app.c/h`, and `board.c/h` files.
+The ECU supervises required CM200 feedback, AMS status/power frames, CAN freshness, sequence/coherency, hardware mailbox ownership, and bus error state. v2.10.7 adds the dedicated bxCAN status/error (`CAN1_SCE`) interrupt path so bus-off/error notification handling is not dependent on unrelated RX traffic.
 
-The `ext_drivers` subdirectory holds the custom driver files for the MCU, ICs and other devices on the board.
+### Cooling
 
-The `tasks` subdirectory contains a file for each task. A task file includes two functions: One function to create the task. And another function for the task body. The task function should be locally scoped to the source file while the task creation function should be included in the header file.
+The cooling path acquires coolant temperature/flow/pressure inputs and drives the coolant pump. Manual bench control is available in inhibited validation profiles; automatic/vehicle use remains subject to validation gates.
 
-### Program Entry
+### Logging
 
-Like normal C programs, it begins in the `main()` function in `main.c`. After initializing the STM peripherals, the FreeRTOS kernel is also initialized. Then a function called `app_create()` is called. Lastly, the FreeRTOS kernel is started. 
+The SD logger records decoded ECU/AMS/CM200 state plus accepted raw CAN traffic without participating in torque authority. See [SD/CAN data logger](docs/ECU_SD_CAN_DATA_LOGGER.md).
 
-The main function calls `app_create()` located in `app.c`. This function recursively initializes all the nested data structures within the `app_data_t` instance. Lastly, it creates the FreeRTOS tasks to be run.
+## Build profiles
 
-Once `app_create()` is finished, the kernel is started. After the `osKernelStart()` function, there is an infinite loop trap. This is because `osKernelStart()` should never return. If it does return for some reason, the infinite loop should catch the control and stop `main()` from returning. This behavior is specific to microcontrollers.
+The source supports compile-time profiles in `Core/Inc/ecu_config.h`. Bench-oriented profiles retain sensing, CAN, diagnostics, logging, and validation functionality while inhibiting propulsion outputs. Vehicle authority requires explicit evidence acknowledgements; those macros represent completed validation evidence, not substitutes for it.
 
-## FreeRTOS Tasks
+See [Current source status](docs/STATUS.md) and [Safety model](docs/SAFETY_MODEL.md).
 
-### APPS Task (Accelerator Pedal Position Sensor)
+## Host validation
 
-As defined in the rules, the APPS sytem must read from two electrically isolated sensors to determine the accelerator position. The car uses two linear potentiometers to acoomplish this.
+From the repository root:
 
-The APPS task reads both of the potentiometers and uses their calibration to calculate their percentages. Then the data is checked for implausibility to comply with secion T.4.2.5 of the rules. In the event of a sustained disagreement between the two sensors, the firmware enters a non-recoverable state. In this error state, the firmware will disable the motor controller, which will allow the motor to free spin, as well as repeatedly sending a 0% torque request to the motor controller. 
+```bash
+cd host_tests
+make CC=gcc ci
+```
 
-If there is no detected error with the APPS data, the task will then populate a CANBus packet with a torque command for the motor controller. The pedal position data is converted to the format specified in the motorcontroller's data sheet. 
+Useful focused targets include:
 
-Then, the task places the CANBus packet inside a message queue and sends a notification to the CANBus Task, letting it know there is a torque command to send. Lastly, the task delays itself for the appropriate amount of OS ticks such that it operates at the desired frequency.
+```bash
+make CC=gcc unit
+make CC=gcc drivers
+make CC=gcc board-integration
+make CC=gcc torque-clamp
+make CC=gcc residual-monitor
+make CC=gcc power-consumer
+make CC=gcc system-sil
+make CC=gcc stress
+make CC=gcc asan
+make CC=gcc ubsan
+```
 
-### BPPC Task (Brake Pedal Plausibility Check)
+See [Validation strategy](docs/VALIDATION.md), `host_tests/README.md`, and `host_tests/docs/TEST_MATRIX.md`.
 
-The BPPC task reads the throttle and brake position data supplied by other tasks. Using thresholds specified by the rules, it determines if the throttle is engaged low (5%) or high (25%). It also determines if the brakes are engaged above a threshold that we consider them "engaged".
+## Target build
 
-If the brakes are engaged and the throttle is above 25%, a BPPC fault has occured. The BPPC fault flag should be set so the ErrorHandle Task can respond appropriately. The BPPC fault is a soft fault, meaning it is recoverable. If there is an active BPPC fault, the throttle must released below 5% to unset the fault.
+The checked-in `.project`, `.cproject`, `.ioc`, linker scripts, STM32 support, FreeRTOS, and FatFs integration are retained so the repository can be imported directly into STM32CubeIDE. CI also contains an ARM-GCC headless-build path for build reproducibility and firmware-size checks.
 
-After handling whether or not to set or unset the BPPC fault flag, the task then delays so that it can run at a desired frequency.
+## Hardware and bring-up
 
-### BSE Task (Brake System Encoder)
+- [Pin map](docs/PIN_MAP.md)
+- [ECU hardware bring-up](docs/ECU_HARDWARE_BRINGUP.md)
+- [BSPD interface and test plan](docs/BSPD_INTERFACE_AND_TEST_PLAN.md)
+- [Current-model certification campaign](docs/ECU_CURRENT_MODEL_CERTIFICATION_CAMPAIGN.md)
 
-The BSE task is very similar to the APPS task. However, it reads the pressure transducers attached to the brake lines instead. The APPS task was given 2 out of 3 of the ADCs on the STM32F7 since accelerator data precision is much more important than the brakes. The BSE task is then left to use the remaining ADC for both sensors, requiring that the ADC channel is changed in between reads.
+## Contribution/maintenance notes
 
-After acquiring the data, similar safety checks are performed and the average percentage is calculated. The brake light enabling or disabling is then handled for the current state of the brake pedal.
+The historical `Core/Src/ext_drivers/` name is broader than its current contents. It is intentionally retained because CubeIDE metadata, host tests, and CI source-contract gates reference those paths. A future path refactor should be done incrementally with build/test updates rather than as a cosmetic mass rename.
 
-Lastly, the task delays such that it runs at the desired frequency.
-
-### CANBus Task
-
-The CANBus task handles sending CANBus messages from other tasks. In this firmware version, it handles sending torque commands to the motor controller. 
-
-This is an event driven task, meaning it does not delay itself for a predetermined amount of time. Instead, it waits for other tasks to send it a notification that there is something to do.
-
-Upond receiving that notificaiton, it checks where the notificaion value. The task that notifies the CANBus task can set bits in the notificaiton value. For example, the APPS task sets bit 0 and the CANBus receive ISR sets bit 0. The task can check the notificaion value to determine if the CANBus packet in the message queue is a torque command to send to the motor controller or a received message to log.
-
-CANBus packets are placed into a message queue for the CANBus task. Once notified, the task can retreive the packet and act on it accordingly. After processing the CANBus packet, the task awaits another notificaiton.
-
-Currently, no other tasks create and send CANBus messages.
-
-Incomming messages are processed by the `HAL_CAN_RxFifo0MsgPendingCallback()` interrupt in `stm32f7xx_it.c`. Incomming messages are typically from the AMS sending status updates. The data is processed in constant time thanks to the array of pointers called `ams_data_dest` in the interrupt handler. The 8-bytes of the CANBus message are broken into 4 2-byte sections. The first section is the packet identifier, and the other 3 data values. Each identifier correlates to a specific 3 data points. For example, identifier 0 will always contain the AMS State, AIR State, and Output Current. Using this format and array of poiners allows the packets processed in constant time.
-
-### Error Task
-
-The Error task reads error flags set by other tasks and sets larger error states. This allows errors of different processes to be handled in specific ways. Currently there are two types of system faults: hard faults and soft faults. This task also monitors the status of shutdown subsystems and drives the Safety System Arm (SSA) light on the dashboard.
-
-Hard faults are non-recoverable and tasks can change their behavior to maximize safety. In this version of the firmware, the hard faults are APPS, BSE, Coolant Overtemp, and Cascadia Error. If a hard fault is present, the motor controller is disabled. If the hard fault is a coolant overtemp, then the firmware state is set to false. This will trigger shutdown and disconnect HV from the motor controller. The rules do not specify deactivating the tractive system upon APPS and BSE faults. So it was determined that only a coolant fault would require disabling the tractive system. 
-
-Soft faults, on the other hand, are recoverable and do not require that the car be put into a full safety mode. The current soft faults include BPPC, CLI, ACC, CANBus, and Dashboard. Nothing happens on soft faults and they can usually be ignored for critical functionality.
-
-Each iteration of the Error task reads the status of all shutdown subsystems as well as the error signal from the motor controller. This helps update SSA conditions and providing useful information to the driver. The shutdown signals read are BMS, IMD, and BSPD. If the AIRs are open and there are no current faults in the shutdown circuit, then the SSA light is illuminated.
-
-This task also updates the RTC registers.
-
-### RTD Task (Ready To Drive)
-
-The RTD task checks the three safety criteria (defined in EV9.4.2) before allowing the car to be "started". These criteria include: Tractive System Active, Brakes engaged, and RTD button pressed by driver. If all three of these are met, the task will set the RTD flag. This RTD flag allows the APPS task to send torque commands to the motor controller. The RTD task reads the TSAL signal, RTD Button State, and the Cascadia OK State. This task can be broken into two conditions:
-
-If the RTD flag is unset, meaning the car is not RTD, and the conditions are met, the buzzer is enabled for 3 seconds before setting the RTD flag to be true. While the flag is unset, the task delays for only 50ms.
-
-If the RTD flag is set, meaning the car previously went through the RTD sequence, it checks for conditions to unset RTD. While in RTD, if TSAL disables or the RTD switch is released, then the shutdown circuit is tripped and RTD is unset. This is not specified in the rules, but it was determined to be desired behavior that removing the RTD key should disable the car. The shutdown circuit is tripped by setting firmware state to false for 100ms then setting it back to true. This will make the AIRs open and the SSA light enable. Allowing the driver to put the car back by pressing SSA.
-
-### ACC Task (Accelerometer)
-
-The ACC task just utilizes the MPU6050 driver to read all the data values. It updates the `mpu6050_t` data structure. For now, the information is not being used. But it is intended to be recorded to the SD card in later FW versions.
-
-### CLI Task (Command Line Interface)
-
-The CLI Task handles all incomming commands from the user. When connected to the serial port, each character received triggers the `HAL_UART_RxCpltCallback()` interrupt in `stm32f7xx_it.c`. The characters are stored in a buffer. Once a newline has been sent, the interrupt callback notifies the CLI task to process the command. 
-
-Once notified, the CLI task copies the buffer and tokenizes it. Once broken into tokens, the command can be dynamically processed comparing them to the entries in the `command_t` array.
-
-### Coolant Task
-
-The Coolant task reads pressure sensor, flow sensor, and 2 temperature sensors. It then determines if there is an overtemp condition. As well, this task sets the pump PWM duty cycle. In the current firmware version, it does not dynamically change the pump duty cycle since the coolant sensors have yet to be calibrated.
-
-### Dashboard Taks
-
-The Dashboard task sends data from the ECU to the Dashboard Raspberry Pi via UART. The current version of the firmware only sends data for throttle, brake, RTD, BMS fail, IMD fail, and ECU fault.
-
+Repository status, known target-validation gaps, and version notes are kept in maintained documents under `docs/` rather than accumulating one-off patch/review files at the repository root.

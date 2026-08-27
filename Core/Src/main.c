@@ -19,7 +19,6 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "cmsis_os.h"
-#include "fatfs.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -126,7 +125,6 @@ int main(void)
   MX_I2C2_Init();
   MX_TIM3_Init();
   MX_TIM4_Init();
-  MX_FATFS_Init();
   /* USER CODE BEGIN 2 */
 
   /* USER CODE END 2 */
@@ -159,6 +157,7 @@ int main(void)
   /* add threads, ... */
 #endif
   app_create();
+  ecu_watchdog_init();
   /* USER CODE END RTOS_THREADS */
 
   /* USER CODE BEGIN RTOS_EVENTS */
@@ -167,6 +166,8 @@ int main(void)
 
   /* Start scheduler */
   osKernelStart();
+
+  ecu_force_safe_outputs();
 
   /* We should never get here as control is now taken by the scheduler */
 
@@ -284,7 +285,7 @@ void MX_ADC1_Init(void)
   */
   sConfig.Channel = ADC_CHANNEL_3;
   sConfig.Rank = ADC_REGULAR_RANK_1;
-  sConfig.SamplingTime = ADC_SAMPLETIME_3CYCLES;
+  sConfig.SamplingTime = ADC_SAMPLETIME_56CYCLES;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     Error_Handler();
@@ -336,7 +337,7 @@ void MX_ADC2_Init(void)
   */
   sConfig.Channel = ADC_CHANNEL_10;
   sConfig.Rank = ADC_REGULAR_RANK_1;
-  sConfig.SamplingTime = ADC_SAMPLETIME_3CYCLES;
+  sConfig.SamplingTime = ADC_SAMPLETIME_56CYCLES;
   if (HAL_ADC_ConfigChannel(&hadc2, &sConfig) != HAL_OK)
   {
     Error_Handler();
@@ -388,7 +389,7 @@ void MX_ADC3_Init(void)
   */
   sConfig.Channel = ADC_CHANNEL_13;
   sConfig.Rank = ADC_REGULAR_RANK_1;
-  sConfig.SamplingTime = ADC_SAMPLETIME_3CYCLES;
+  sConfig.SamplingTime = ADC_SAMPLETIME_56CYCLES;
   if (HAL_ADC_ConfigChannel(&hadc3, &sConfig) != HAL_OK)
   {
     Error_Handler();
@@ -408,18 +409,19 @@ void MX_CAN1_Init(void)
 {
 
   /* USER CODE BEGIN CAN1_Init 0 */
-  CAN_FilterTypeDef canfil;
+  /* Acceptance filters are owned by canbus_device_init() and are installed
+   * before HAL_CAN_Start().  Do not add a permissive catch-all filter here. */
   /* USER CODE END CAN1_Init 0 */
 
   /* USER CODE BEGIN CAN1_Init 1 */
 
   /* USER CODE END CAN1_Init 1 */
   hcan1.Instance = CAN1;
-  hcan1.Init.Prescaler = 12;
+  hcan1.Init.Prescaler = DER26_CAN_PRESCALER;
   hcan1.Init.Mode = CAN_MODE_NORMAL;
-  hcan1.Init.SyncJumpWidth = CAN_SJW_1TQ;
-  hcan1.Init.TimeSeg1 = CAN_BS1_15TQ;
-  hcan1.Init.TimeSeg2 = CAN_BS2_2TQ;
+  hcan1.Init.SyncJumpWidth = DER26_CAN_SJW;
+  hcan1.Init.TimeSeg1 = DER26_CAN_BS1;
+  hcan1.Init.TimeSeg2 = DER26_CAN_BS2;
   hcan1.Init.TimeTriggeredMode = DISABLE;
   hcan1.Init.AutoBusOff = ENABLE;
   hcan1.Init.AutoWakeUp = ENABLE;
@@ -431,20 +433,9 @@ void MX_CAN1_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN CAN1_Init 2 */
-  canfil.FilterBank = 0;
-  canfil.FilterMode = CAN_FILTERMODE_IDMASK;
-  canfil.FilterFIFOAssignment = CAN_RX_FIFO0;
-  canfil.FilterIdHigh = 0;
-  canfil.FilterIdLow = 0;
-  canfil.FilterMaskIdHigh = 0;
-  canfil.FilterMaskIdLow = 0;
-  canfil.FilterScale = CAN_FILTERSCALE_32BIT;
-  canfil.FilterActivation = ENABLE;
-  canfil.SlaveStartFilterBank = 14;
-
-  HAL_CAN_ConfigFilter(&hcan1, &canfil); // Initialize CAN Filter
-
-  HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING);
+  /* CAN notifications are activated once, after canbus_device_init() has
+   * installed acceptance filters and started the peripheral.  app_create()
+   * owns that checked activation step. */
   /* USER CODE END CAN1_Init 2 */
 
 }
@@ -592,7 +583,7 @@ void MX_SPI6_Init(void)
   hspi6.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
   hspi6.Init.CRCPolynomial = 7;
   hspi6.Init.CRCLength = SPI_CRC_LENGTH_DATASIZE;
-  hspi6.Init.NSSPMode = SPI_NSS_PULSE_ENABLE;
+  hspi6.Init.NSSPMode = SPI_NSS_PULSE_DISABLE;
   if (HAL_SPI_Init(&hspi6) != HAL_OK)
   {
     Error_Handler();
@@ -682,9 +673,9 @@ void MX_TIM4_Init(void)
 
   /* USER CODE END TIM4_Init 1 */
   htim4.Instance = TIM4;
-  htim4.Init.Prescaler = 16;
+  htim4.Init.Prescaler = 17;
   htim4.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim4.Init.Period = 65535;
+  htim4.Init.Period = 59999;
   htim4.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim4.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
   if (HAL_TIM_Base_Init(&htim4) != HAL_OK)
@@ -890,13 +881,13 @@ void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(GPIOF, MTR_EN_Pin|Buzzer_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(Firmware_Ok_GPIO_Port, Firmware_Ok_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, Cascadia_ON_Pin|Firmware_Ok_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(Brake_Light_GPIO_Port, Brake_Light_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(SPI6_NSS_GPIO_Port, SPI6_NSS_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(SPI6_NSS_GPIO_Port, SPI6_NSS_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pins : PE2 PE3 PE5 PE6
                            PE7 PE8 PE9 PE10
@@ -913,7 +904,7 @@ void MX_GPIO_Init(void)
   /*Configure GPIO pin : RTD_Go_Pin */
   GPIO_InitStruct.Pin = RTD_Go_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(RTD_Go_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : PC13 PC1 PC2 PC4
@@ -939,27 +930,27 @@ void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOF, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PA1 PA2 PA4 PA5
-                           PA6 PA8 PA9 PA10
-                           PA11 PA12 PA15 */
-  GPIO_InitStruct.Pin = GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_4|GPIO_PIN_5
-                          |GPIO_PIN_6|GPIO_PIN_8|GPIO_PIN_9|GPIO_PIN_10
-                          |GPIO_PIN_11|GPIO_PIN_12|GPIO_PIN_15;
+  /*Configure GPIO pins : PA1 PA2 PA4 PA6
+                           PA8 PA9 PA10 PA11
+                           PA12 PA15 */
+  GPIO_InitStruct.Pin = GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_4|GPIO_PIN_6
+                          |GPIO_PIN_8|GPIO_PIN_9|GPIO_PIN_10|GPIO_PIN_11
+                          |GPIO_PIN_12|GPIO_PIN_15;
   GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : Firmware_Ok_Pin */
-  GPIO_InitStruct.Pin = Firmware_Ok_Pin;
+  /*Configure GPIO pins : Cascadia_ON_Pin Firmware_Ok_Pin */
+  GPIO_InitStruct.Pin = Cascadia_ON_Pin|Firmware_Ok_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(Firmware_Ok_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /*Configure GPIO pin : TSAL_HV_SIG_Pin */
   GPIO_InitStruct.Pin = TSAL_HV_SIG_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
   HAL_GPIO_Init(TSAL_HV_SIG_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : PB0 PB10 PB11 PB12
@@ -975,13 +966,13 @@ void MX_GPIO_Init(void)
   /*Configure GPIO pin : MTR_Fault_Pin */
   GPIO_InitStruct.Pin = MTR_Fault_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(MTR_Fault_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : MTR_Ok_Pin IMD_Fail_Pin BMS_Fail_Pin */
   GPIO_InitStruct.Pin = MTR_Ok_Pin|IMD_Fail_Pin|BMS_Fail_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(GPIOF, &GPIO_InitStruct);
 
   /*Configure GPIO pins : PG0 PG1 PG2 PG3
@@ -994,11 +985,11 @@ void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOG, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : BSPD_Fail_Pin */
-  GPIO_InitStruct.Pin = BSPD_Fail_Pin;
+  /*Configure GPIO pin : BSPD_OK_Pin */
+  GPIO_InitStruct.Pin = BSPD_OK_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(BSPD_Fail_GPIO_Port, &GPIO_InitStruct);
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  HAL_GPIO_Init(BSPD_OK_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : PD10 PD11 PD12 PD13
                            PD15 PD2 PD3 PD4
@@ -1080,6 +1071,7 @@ void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
+  ecu_force_safe_outputs();
   __disable_irq();
   while (1)
   {

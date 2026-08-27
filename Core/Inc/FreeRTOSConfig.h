@@ -57,20 +57,24 @@
 
 #define configUSE_PREEMPTION                     1
 #define configSUPPORT_STATIC_ALLOCATION          1
-#define configSUPPORT_DYNAMIC_ALLOCATION         1
+#define configSUPPORT_DYNAMIC_ALLOCATION         0
 #define configUSE_IDLE_HOOK                      0
 #define configUSE_TICK_HOOK                      0
 #define configCPU_CLOCK_HZ                       ( SystemCoreClock )
 #define configTICK_RATE_HZ                       ((TickType_t)1000)
 #define configMAX_PRIORITIES                     ( 56 )
 #define configMINIMAL_STACK_SIZE                 ((uint16_t)256)
-#define configTOTAL_HEAP_SIZE                    ((size_t)32768)
+#define configTOTAL_HEAP_SIZE                    ((size_t)1024)
+/* The ECU uses a static-only kernel configuration. The generated heap_4.c
+ * file remains in the repository for CubeMX compatibility but is excluded
+ * from the target build while dynamic allocation is disabled. */
 #define configMAX_TASK_NAME_LEN                  ( 16 )
 #define configUSE_TRACE_FACILITY                 1
 #define configUSE_16_BIT_TICKS                   0
 #define configUSE_MUTEXES                        1
 #define configQUEUE_REGISTRY_SIZE                8
 #define configCHECK_FOR_STACK_OVERFLOW           2
+#define configUSE_MALLOC_FAILED_HOOK             1
 #define configUSE_RECURSIVE_MUTEXES              1
 #define configUSE_COUNTING_SEMAPHORES            1
 #define configUSE_PORT_OPTIMISED_TASK_SELECTION  0
@@ -91,7 +95,9 @@
 #define configTIMER_TASK_STACK_DEPTH             512
 
 /* The following flag must be enabled only when using newlib */
+#ifndef configUSE_NEWLIB_REENTRANT
 #define configUSE_NEWLIB_REENTRANT          1
+#endif
 
 /* Set the following definitions to 1 to include the API function, or zero
 to exclude the API function. */
@@ -112,7 +118,9 @@ to exclude the API function. */
  * The CMSIS-RTOS V2 FreeRTOS wrapper is dependent on the heap implementation used
  * by the application thus the correct define need to be enabled below
  */
+#if (configSUPPORT_DYNAMIC_ALLOCATION == 1)
 #define USE_FreeRTOS_HEAP_4
+#endif
 
 /* Cortex-M specific definitions. */
 #ifdef __NVIC_PRIO_BITS
@@ -142,7 +150,8 @@ See http://www.FreeRTOS.org/RTOS-Cortex-M3-M4.html. */
 /* Normal assert() semantics without relying on the provision of an assert.h
 header file. */
 /* USER CODE BEGIN 1 */
-#define configASSERT( x ) if ((x) == 0) {taskDISABLE_INTERRUPTS(); for( ;; );}
+extern void ecu_force_safe_outputs(void);
+#define configASSERT( x ) if ((x) == 0) {ecu_force_safe_outputs(); taskDISABLE_INTERRUPTS(); for( ;; );}
 /* USER CODE END 1 */
 
 /* Definitions that map the FreeRTOS port interrupt handlers to their CMSIS
