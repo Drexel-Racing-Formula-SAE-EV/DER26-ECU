@@ -119,7 +119,6 @@ void app_create()
 	app.cm200_runtime_fault_latched = false;
 	app.dashboard_fault = false;
 	app.mq_fault = false;
-	app.log_fault = false;
 
 	app.fw_state = false;
 	app.tsal = false;
