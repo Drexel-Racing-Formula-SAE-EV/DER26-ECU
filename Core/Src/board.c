@@ -29,7 +29,7 @@ void board_init(board_t *dev)
 	flow_sensor_init(&dev->cool_flow, 108000000, dev->stm32f767.htim5, TIM5, TIM_CHANNEL_2, TIM_CHANNEL_1);
 	ntc_init(&dev->cool_temp1, dev->stm32f767.hadc3, COOL_TEMP1_CH);
 	ntc_init(&dev->cool_temp2, dev->stm32f767.hadc3, COOL_TEMP2_CH);
-	pwm_device_init(&dev->cool_pump, TIM4, dev->stm32f767.htim4, 65535, &TIM4->CCR3, 3);
+	pwm_device_init(&dev->cool_pump, TIM4, dev->stm32f767.htim4, 59999, &TIM4->CCR3, 3);
 	ams_init(&dev->ams);
 	cm200_init(&dev->cm200);
 	canbus_device_init(&dev->canbus, dev->stm32f767.hcan1, &dev->stm32f767.can1_txheader);

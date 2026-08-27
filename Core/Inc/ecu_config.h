@@ -11,7 +11,9 @@
 /*
  * 0: bench profile.  Torque requests and the two CM200 hardware-enable outputs
  *    remain inhibited while all sensing, CAN reception, CLI, and diagnostics run.
- * 1: vehicle profile.  Requires the BPSD interface acknowledgement below.
+ * 1: vehicle profile. Requires all release evidence below.
+ * 2: test-day profile. Real sensing/CAN/logging/cooling execute, but propulsion
+ *    outputs remain inhibited exactly like bench.
  */
 #ifndef ECU_BUILD_PROFILE
 #define ECU_BUILD_PROFILE 0
@@ -19,20 +21,39 @@
 
 #define ECU_BUILD_PROFILE_BENCH   0
 #define ECU_BUILD_PROFILE_VEHICLE 1
+#define ECU_BUILD_PROFILE_TESTDAY 2
+
+/* Immutable source-package provenance for this reviewed TESTDAY drop.
+ * This is an archive identity, not a claim that a Git object was available in
+ * the review environment. */
+#ifndef ECU_BUILD_SOURCE_REVISION
+#define ECU_BUILD_SOURCE_REVISION "DER26-ECU-v2.10.7-SAFETY2-20260827"
+#endif
+#define ECU_CAN_LOGGER_SCHEMA_REVISION "LOGGER3"
+#define ECU_BUILD_CONFIG_FINGERPRINT 0xEC021007u
 
 #if ((ECU_BUILD_PROFILE != ECU_BUILD_PROFILE_BENCH) && \
-     (ECU_BUILD_PROFILE != ECU_BUILD_PROFILE_VEHICLE))
-#error "ECU_BUILD_PROFILE must be 0 (bench) or 1 (vehicle)"
+     (ECU_BUILD_PROFILE != ECU_BUILD_PROFILE_VEHICLE) && \
+     (ECU_BUILD_PROFILE != ECU_BUILD_PROFILE_TESTDAY))
+#error "ECU_BUILD_PROFILE must be 0 (bench), 1 (vehicle), or 2 (testday)"
+#endif
+
+#if ECU_BUILD_PROFILE == ECU_BUILD_PROFILE_VEHICLE
+#define ECU_BUILD_PROFILE_NAME "vehicle"
+#elif ECU_BUILD_PROFILE == ECU_BUILD_PROFILE_TESTDAY
+#define ECU_BUILD_PROFILE_NAME "testday"
+#else
+#define ECU_BUILD_PROFILE_NAME "bench"
 #endif
 
 /*
- * The BPSD schematic exports a nominal 12 V, active-high 'BSPD Ok' signal.
- * PE13 is a 3.3 V MCU input and the breakout schematic shows no level shifter.
- * The vehicle profile is therefore locked until a protected, fail-low 3.3 V
- * interface has been installed and electrically validated.
+ * The original BSPD schematic exported a nominal 12 V, active-high 'BSPD Ok'
+ * signal. The 2026-08-25 hardware correction adds a protected fail-low 3.3 V
+ * interface before PE13; this reviewed package records that hardware item as
+ * resolved.
  */
 #ifndef ECU_BSPD_INTERFACE_3V3_VALIDATED
-#define ECU_BSPD_INTERFACE_3V3_VALIDATED 0
+#define ECU_BSPD_INTERFACE_3V3_VALIDATED 1
 #endif
 
 #if ((ECU_BSPD_INTERFACE_3V3_VALIDATED != 0) && \
@@ -48,7 +69,11 @@
 /* The torque gate depends on these CM200 EEPROM/CAN settings being
  * measured on the real controller: standard 11-bit offset 0x0A0, required
  * A5/A7/AA/AB/AC/B1 broadcasts active at the documented rates, CAN torque
- * mode, and rolling-counter checking enabled. */
+ * mode, and rolling-counter checking enabled. The fixed 333 Hz 0x0B0 high-
+ * speed stream and other unused 100 Hz broadcasts must remain disabled unless
+ * the whole-vehicle DER26-CAN-V4 arbitration/load test explicitly budgets them.
+ * Vehicle target is 500 kbps; the safety/authority architecture must remain
+ * correct at 250 kbps with detail telemetry allowed to degrade/supersede. */
 #ifndef ECU_CM200_CAN_CONTRACT_VALIDATED
 #define ECU_CM200_CAN_CONTRACT_VALIDATED 0
 #endif
@@ -123,9 +148,34 @@
 #ifndef ECU_CURRENT_RESIDUAL_VALIDATED
 #define ECU_CURRENT_RESIDUAL_VALIDATED 0
 #endif
+/* Residual-monitor measurement uncertainty is part of the vehicle release
+ * evidence, not a magic test-only constant. Values are in 0.1 A so they remain
+ * usable in preprocessor gates and are converted to amperes by canbus_task. */
+#ifndef ECU_CURRENT_RESIDUAL_UNCERTAINTY_NEG_0P1A
+#define ECU_CURRENT_RESIDUAL_UNCERTAINTY_NEG_0P1A 0u
+#endif
+#ifndef ECU_CURRENT_RESIDUAL_UNCERTAINTY_POS_0P1A
+#define ECU_CURRENT_RESIDUAL_UNCERTAINTY_POS_0P1A 0u
+#endif
+
+#if (ECU_BUILD_PROFILE == ECU_BUILD_PROFILE_VEHICLE) && \
+    ECU_CURRENT_RESIDUAL_VALIDATED && \
+    ((ECU_CURRENT_RESIDUAL_UNCERTAINTY_NEG_0P1A == 0u) || \
+     (ECU_CURRENT_RESIDUAL_UNCERTAINTY_POS_0P1A == 0u))
+#error "Vehicle current-residual validation requires nonzero measured negative/positive current uncertainty"
+#endif
 #ifndef ECU_COOLING_VALIDATED
 #define ECU_COOLING_VALIDATED 0
 #endif
+
+/* Source-owned implementation latch. Conversion, plausibility, debounced
+ * fault policy and inverted PCE-XL PWM are implemented and host tested.
+ * ECU_COOLING_VALIDATED remains a separate target-evidence gate for bath,
+ * pressure, flow and assembled-loop validation. */
+#ifdef ECU_COOLING_IMPLEMENTATION_COMPLETE
+#error "ECU_COOLING_IMPLEMENTATION_COMPLETE is source controlled; do not define it externally"
+#endif
+#define ECU_COOLING_IMPLEMENTATION_COMPLETE 1
 #ifndef ECU_RTOS_MEMORY_VALIDATED
 #define ECU_RTOS_MEMORY_VALIDATED 0
 #endif
@@ -154,6 +204,30 @@
 #if ((ECU_BUILD_PROFILE == ECU_BUILD_PROFILE_VEHICLE) && \
      !(ECU_FULL_RELEASE_EVIDENCE))
 #error "Vehicle profile requires complete ECU pin/input/current/cooling/RTOS/WCET/CAN/watchdog release evidence"
+#endif
+
+#if ((ECU_BUILD_PROFILE == ECU_BUILD_PROFILE_VEHICLE) && \
+     (ECU_COOLING_IMPLEMENTATION_COMPLETE != 1))
+#error "Vehicle profile is locked: coolant temperature conversion and coolant fault policy are not implemented/calibrated"
+#endif
+
+/* Best-effort SD logger. It is deliberately non-gating and lower priority
+ * than every sensing/control task. Bench images auto-start when a card is
+ * available; vehicle release still requires separate logging/CAN-load proof. */
+#ifndef ECU_DATA_LOGGER_ENABLE
+#define ECU_DATA_LOGGER_ENABLE 1
+#endif
+#ifndef ECU_DATA_LOGGER_AUTOSTART
+#define ECU_DATA_LOGGER_AUTOSTART \
+    ((ECU_BUILD_PROFILE == ECU_BUILD_PROFILE_BENCH) || \
+     (ECU_BUILD_PROFILE == ECU_BUILD_PROFILE_TESTDAY) || \
+     ((ECU_BUILD_PROFILE == ECU_BUILD_PROFILE_VEHICLE) && ECU_CAN_LOAD_VALIDATED))
+#endif
+#ifndef ECU_DATA_LOGGER_DEFAULT_HZ
+#define ECU_DATA_LOGGER_DEFAULT_HZ 10u
+#endif
+#if (ECU_DATA_LOGGER_DEFAULT_HZ < 1u) || (ECU_DATA_LOGGER_DEFAULT_HZ > 100u)
+#error "ECU_DATA_LOGGER_DEFAULT_HZ must be 1..100 Hz"
 #endif
 
 #define ECU_OUTPUTS_INHIBITED (ECU_BUILD_PROFILE != ECU_BUILD_PROFILE_VEHICLE)

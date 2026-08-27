@@ -1,61 +1,48 @@
-# ECU Host Tests
+# DER26 ECU Host Validation Suite
 
-These suites exercise portable ECU parser, safety, current-model, clamp, and residual-monitor logic without STM32 hardware. They do not prove pin levels, interrupt timing, target ABI, CM200 EEPROM configuration, physical CAN behavior, or vehicle calibration.
+The host suite executes safety-relevant ECU logic on Linux with deterministic fake HAL, FreeRTOS queue, and FatFs layers. It complements the STM32 ARM-GCC build; it does not replace target timing, electrical, HIL, or vehicle validation.
 
-## Main coverage
-
-- legacy and compact AMS decoding, freshness, sequence, physical plausibility, and immediate invalidation;
-- protocol-v2 coherent DCL/CCL bundle and advisory handling;
-- live AMS v0.3.6 producer-to-ECU-consumer compatibility;
-- CM200 feedback decoding, freshness, counter/echo/timer integrity, capability, and fault gating;
-- RTD, BSPD, heartbeat, torque-gate, and deterministic fault-injection SIL;
-- torque/current schema and boot qualification;
-- direct whole-cell path enumeration;
-- input-age uncertainty and region-overflow behavior;
-- zero hysteresis, sign history, reversal-through-zero prevention;
-- full-span transition lookup and transition refinement;
-- settled tracking, microstep margin, cumulative drift, settling, and re-anchor;
-- battery-authority classification;
-- comparison-only final commit verification;
-- execution-count bounds tied to the maximum accepted schema;
-- aggregate current residual monitoring and source-epoch transitions;
-- independent Python/C current-model vectors;
-- 20,000 randomized clamp contract iterations and extended 50,000-cycle SIL stress;
-- ASan, UBSan, Clang static analysis, and build-profile gates.
-
-## Recommended local commands
+## One-command validation
 
 From `host_tests/`:
 
 ```sh
-make CC=clang clean
-make CC=clang CLANG=clang clang-ci
-make CC=clang asan
-make CC=clang ubsan
-make CC=clang stress
+make clean
+make -j2 ci
 ```
 
-Focused current-model targets:
+`make ci` runs the normal contract, regression, driver, board-integration, storage, power-protocol, SIL, stress, evidence-gate, and GCC analyzer targets.
+
+For sanitizer and Clang analysis:
 
 ```sh
-make CC=clang torque-clamp
-make CC=clang residual-monitor
-make CC=clang current-model-differential
+make asan
+make ubsan
+make CLANG=clang clang-analyze
 ```
 
-Protocol targets:
+For extended deterministic stress:
 
 ```sh
-make CC=clang power-consumer
-make CC=clang power-integration
-make CC=clang power-golden
-make CC=clang power-source-compat AMS_ROOT=/path/to/DER26-AMS/AMS
+make stress-long
 ```
 
-`power-source-compat` compiles the live AMS `ams_power_can.c` producer together with the ECU consumer, compares all six protocol-v2 payloads against locked vectors, and validates the decoded authority, envelope, and resource state. It requires a sibling AMS source tree and is intentionally separate from standalone `clang-ci`.
+That target runs 250,000 system fault/fuzz iterations and 2,000,000 cross-module cycles. The normal `cross-stress` target runs 200,000 cycles. Sanitizer jobs also run a 25,000-cycle cross-module pass.
 
-## CI notes
+## Coverage layers
 
-`make clang-ci` runs current-model contract tests, residual-monitor tests, independent Python/C vectors, legacy unit/regression suites, protocol-v2 conformance/integration/golden tests, system SIL, profile gates, and Clang analysis.
+- **Focused unit/regression:** AMS compact and legacy frames, CM200 supervision, torque authority, current model, residual monitor, timing boundaries, and protocol vectors.
+- **Device drivers:** map conversion, APPS potentiometers, pressure sensing, PWM, flow capture, NTC setup, CLI, dashboard UART, MPU6050, and CAN.
+- **Board integration:** executes production `board_init()` against fake STM32 handles and verifies every configured channel, timer, UART, I2C device, and CAN startup result.
+- **Storage fault injection:** executes production `sdcard_service.c` against scripted FatFs/disk responses for no-card, geometry, mount, short write, corrupt readback, and soak interruption paths.
+- **System SIL:** RTD sequencing, BSPD and discrete recovery, AMS/CM200 faults, stale data, malformed/random frames, heartbeat, torque slew, and wraparound behavior.
+- **Cross-module stress:** randomized analog inputs, NaN/Inf PWM requests, timer captures, torque-gate combinations, CAN latest-value behavior, CM200 counters, and AMS parser invariants.
+- **Static/evidence gates:** all 40 `Core/Src` files must have an explicit host/static/target-build coverage classification; all ten tasks must remain static and startup-gated; CPU fault handlers must force safe outputs; SD and vehicle evidence contracts remain fail-closed.
 
-Team CI may run portable suites with GCC and performs a bench ARM-GCC build. A fully acknowledged vehicle source may parse because the implementation latch is enabled, but the default vehicle build remains blocked by external BSPD, CM200, and clamp-validation evidence. The checked-in numerical calibration remains deliberately invalid.
+The suite currently contains 79 named test functions plus protocol probes, differential vectors, integration runners, and deterministic stress loops. See [TEST_MATRIX.md](docs/TEST_MATRIX.md).
+
+## Important target boundaries
+
+The following still require the ARM target build and/or hardware: generated HAL/MSP startup, actual ADC sampling, timer capture electrical behavior, UART/CAN transceivers, SD-card signal/power behavior, interrupt priority/timing, task WCET, stack margins, watchdog operation, and physical safe-output verification.
+
+The GitHub workflow runs host CI, sanitizers, GCC and bounded Clang analyzers, a headless ARM-GCC build, and a weekly/manual long-stress job.

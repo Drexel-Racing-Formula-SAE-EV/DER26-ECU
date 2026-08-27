@@ -2,6 +2,7 @@
 set -euo pipefail
 
 required_paths=(
+  ".cproject"
   "Core/Inc/app.h"
   "Core/Inc/board.h"
   "Core/Inc/ecu_config.h"
@@ -17,16 +18,16 @@ required_paths=(
   "Core/Src/power/ecu_torque_clamp.c"
   "Core/Inc/power/ecu_current_residual_monitor.h"
   "Core/Src/power/ecu_current_residual_monitor.c"
-  "Core/docs/ECU_TORQUE_TO_PACK_CURRENT_CLAMP.md"
-  "Core/docs/ECU_CURRENT_MODEL_CERTIFICATION_CAMPAIGN.md"
+  "docs/ECU_TORQUE_TO_PACK_CURRENT_CLAMP.md"
+  "docs/ECU_CURRENT_MODEL_CERTIFICATION_CAMPAIGN.md"
   "Core/Src/tasks/canbus_task.c"
   "Core/Src/stm32f7xx_it.c"
-  "Core/docs/BSPD_INTERFACE_AND_TEST_PLAN.md"
-  "Core/docs/ECU_HARDWARE_BRINGUP.md"
-  "Core/docs/CM200_CAN_CONTRACT_AND_BRINGUP.md"
-  "Core/docs/ECU_AMS_CAN_CONTRACT.md"
-  "Core/docs/ECU_AMS_POWER_PROTOCOL_V2.md"
-  "Core/docs/ECU_TORQUE_REMOVAL_AND_AVAILABILITY_BUDGET.md"
+  "docs/BSPD_INTERFACE_AND_TEST_PLAN.md"
+  "docs/ECU_HARDWARE_BRINGUP.md"
+  "docs/CM200_CAN_CONTRACT_AND_BRINGUP.md"
+  "docs/ECU_AMS_CAN_CONTRACT.md"
+  "docs/ECU_AMS_POWER_PROTOCOL_V2.md"
+  "docs/ECU_TORQUE_REMOVAL_AND_AVAILABILITY_BUDGET.md"
   "ci/scripts/check_residual_authority_gate.sh"
   "ci/scripts/check_current_model_evidence_gate.sh"
   "ci/scripts/check_core_host_syntax.sh"
@@ -76,5 +77,31 @@ if ! grep -q "HAL_CAN_ActivateNotification(app.board.canbus.hcan" Core/Src/app.c
   echo "app_create() must own the checked post-start CAN notification activation"
   exit 1
 fi
+
+# The ECU subscribes to bxCAN TX/RX0/SCE notification classes. Keep the NVIC,
+# vector handlers, and CubeMX project in sync so bus-off/error handling cannot
+# become dependent on unrelated RX traffic.
+for irq in CAN1_TX CAN1_RX0 CAN1_SCE; do
+  grep -q "HAL_NVIC_EnableIRQ(${irq}_IRQn)" Core/Src/stm32f7xx_hal_msp.c || { echo "Missing ${irq} NVIC enable"; exit 1; }
+  grep -q "HAL_NVIC_DisableIRQ(${irq}_IRQn)" Core/Src/stm32f7xx_hal_msp.c || { echo "Missing ${irq} NVIC disable"; exit 1; }
+  grep -q "void ${irq}_IRQHandler(void)" Core/Src/stm32f7xx_it.c || { echo "Missing ${irq} IRQ handler"; exit 1; }
+done
+
+grep -q 'NVIC.CAN1_TX_IRQn=true' DER26-ECU.ioc || { echo "CubeMX must enable CAN1_TX_IRQn"; exit 1; }
+grep -q 'NVIC.CAN1_RX0_IRQn=true' DER26-ECU.ioc || { echo "CubeMX must enable CAN1_RX0_IRQn"; exit 1; }
+grep -q 'NVIC.CAN1_SCE_IRQn=true' DER26-ECU.ioc || { echo "CubeMX must enable CAN1_SCE_IRQn"; exit 1; }
+
+for notification in CAN_IT_TX_MAILBOX_EMPTY CAN_IT_RX_FIFO0_MSG_PENDING CAN_IT_RX_FIFO0_OVERRUN CAN_IT_ERROR_WARNING CAN_IT_ERROR_PASSIVE CAN_IT_BUSOFF CAN_IT_LAST_ERROR_CODE CAN_IT_ERROR; do
+  grep -q "$notification" Core/Src/app.c || { echo "Missing CAN notification: $notification"; exit 1; }
+done
+
+# This package is an explicit BENCH Validation target. Propulsion outputs are
+# source-inhibited by ECU_BUILD_PROFILE_BENCH while sensing, CAN, logging, CLI
+# and coolant-pump manual control remain available for validation.
+python3 -c 'import xml.etree.ElementTree as E; E.parse(".cproject")'
+[[ "$(grep -c 'name="BENCH Validation Debug"' .cproject)" -ge 1 ]] || { echo "Missing BENCH Validation Debug CubeIDE configuration"; exit 1; }
+[[ "$(grep -c 'name="BENCH Validation Release"' .cproject)" -ge 1 ]] || { echo "Missing BENCH Validation Release CubeIDE configuration"; exit 1; }
+[[ "$(grep -c 'value="ECU_BUILD_PROFILE=0"' .cproject)" -eq 2 ]] || { echo "Both ECU CubeIDE configurations must select BENCH"; exit 1; }
+[[ "$(grep -c 'value="DER26_CAN_BITRATE_KBPS=500"' .cproject)" -eq 2 ]] || { echo "Both ECU CubeIDE configurations must select 500 kbit/s"; exit 1; }
 
 echo "Project structure check passed."

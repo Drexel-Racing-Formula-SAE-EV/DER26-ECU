@@ -75,6 +75,9 @@ void bse_task_fn(void *arg)
             if(!adc_ok)
             {
                 data->bse_fault = true;
+                /* Do not publish the last good brake percentage during an
+                 * ADC fault. bse_fault remains the validity/torque gate. */
+                data->brake = 0;
                 set_brakelight(true);
                 osDelayUntil(entry + (1000 / BSE_FREQ));
                 continue;
@@ -83,13 +86,16 @@ void bse_task_fn(void *arg)
         else
         {
             data->bse_fault = true;
+            /* A mutex timeout is an invalid sample, not permission to keep
+             * replaying stale brake telemetry into BPPC/logging. */
+            data->brake = 0;
             set_brakelight(true);
             osDelayUntil(entry + (1000 / BSE_FREQ));
             continue;
         }
 
-        bse_range_ok = (pressure_sensor_check_failure(bse1->count, BSE_IMPLAUSIBILITY_MAX, BSE_IMPLAUSIBILITY_MIN) &&
-                        pressure_sensor_check_failure(bse2->count, BSE_IMPLAUSIBILITY_MAX, BSE_IMPLAUSIBILITY_MIN));
+        bse_range_ok = (pressure_sensor_in_range(bse1->count, BSE_IMPLAUSIBILITY_MAX, BSE_IMPLAUSIBILITY_MIN) &&
+                        pressure_sensor_in_range(bse2->count, BSE_IMPLAUSIBILITY_MAX, BSE_IMPLAUSIBILITY_MIN));
 
         bse1->percent = pressure_sensor_get_percent(bse1);
         bse2->percent = pressure_sensor_get_percent(bse2);

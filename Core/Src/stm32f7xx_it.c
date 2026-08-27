@@ -24,6 +24,8 @@
 /* USER CODE BEGIN Includes */
 #include "cmsis_os.h"
 #include "app.h"
+#include "ext_drivers/ecu_data_logger.h"
+#include "ext_drivers/stm32f767.h"
 #include "string.h"
 /* USER CODE END Includes */
 
@@ -172,6 +174,18 @@ void DebugMon_Handler(void)
 /******************************************************************************/
 
 /**
+  * @brief This function handles CAN1 TX interrupts.
+  */
+void CAN1_TX_IRQHandler(void)
+{
+  extern app_data_t app;
+  if(app.board.canbus.hcan != NULL)
+  {
+    HAL_CAN_IRQHandler(app.board.canbus.hcan);
+  }
+}
+
+/**
   * @brief This function handles CAN1 RX0 interrupts.
   */
 void CAN1_RX0_IRQHandler(void)
@@ -187,6 +201,18 @@ void CAN1_RX0_IRQHandler(void)
 #endif
   HAL_CAN_IRQHandler(hcan1);
   /* USER CODE END CAN1_RX0_IRQn 1 */
+}
+
+/**
+  * @brief This function handles CAN1 status change/error interrupts.
+  */
+void CAN1_SCE_IRQHandler(void)
+{
+  extern app_data_t app;
+  if(app.board.canbus.hcan != NULL)
+  {
+    HAL_CAN_IRQHandler(app.board.canbus.hcan);
+  }
 }
 
 /**
@@ -319,10 +345,16 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
         return;
     }
 
+    const bool dwt_timing = stm32f767_cycle_counter_available();
+    const uint32_t isr_start_cycles = dwt_timing ?
+        stm32f767_cycle_counter_read() : 0u;
+    uint8_t received = 0u;
+
     /* Drain a bounded number of frames per callback.  This prevents a busy bus
      * from monopolizing interrupt time while avoiding one-callback/one-frame
-     * backlog growth. */
-    for(uint8_t received = 0u;
+     * backlog growth.  Target diagnostics record both WCET and whether the
+     * bound was exhausted with additional frames still pending. */
+    for(received = 0u;
         (received < CANBUS_RX_ISR_BUDGET) &&
         (HAL_CAN_GetRxFifoFillLevel(canbus->hcan, CAN_RX_FIFO0) != 0u);
         received++)
@@ -339,7 +371,7 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
         if(HAL_CAN_GetRxMessage(canbus->hcan, CAN_RX_FIFO0, &rx_header, rx_data) != HAL_OK)
         {
             app.canbus_rx_fault = true;
-            return;
+            break;
         }
 
         is_standard = (rx_header.IDE == CAN_ID_STD);
@@ -372,6 +404,10 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
             {
                 canbus->rx_ignored_count++;
             }
+            ecu_data_logger_can_rx_isr(is_standard ? std_id : rx_header.ExtId,
+                                       is_standard, true,
+                                       (uint8_t)rx_header.DLC, rx_data,
+                                       known_ams, known_cm200, false);
             continue;
         }
 
@@ -394,6 +430,11 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
                                            HAL_GetTick());
         }
 
+        ecu_data_logger_can_rx_isr(is_standard ? std_id : rx_header.ExtId,
+                                   is_standard, false,
+                                   (uint8_t)rx_header.DLC, rx_data,
+                                   known_ams, known_cm200, parsed);
+
         if(parsed)
         {
             canbus->rx_accepted_count++;
@@ -405,6 +446,27 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
         else
         {
             canbus->rx_ignored_count++;
+        }
+    }
+
+    if(app.can_rx_isr_callback_count != UINT32_MAX)
+    {
+        app.can_rx_isr_callback_count++;
+    }
+    if((received >= CANBUS_RX_ISR_BUDGET) &&
+       (HAL_CAN_GetRxFifoFillLevel(canbus->hcan, CAN_RX_FIFO0) != 0u) &&
+       (app.can_rx_isr_budget_exhaust_count != UINT32_MAX))
+    {
+        app.can_rx_isr_budget_exhaust_count++;
+    }
+    if(dwt_timing)
+    {
+        const uint32_t elapsed =
+            (uint32_t)(stm32f767_cycle_counter_read() - isr_start_cycles);
+        app.can_rx_isr_last_cycles = elapsed;
+        if(elapsed > app.can_rx_isr_max_cycles)
+        {
+            app.can_rx_isr_max_cycles = elapsed;
         }
     }
 }
@@ -419,12 +481,59 @@ void HAL_CAN_ErrorCallback(CAN_HandleTypeDef *hcan)
     }
 
     app.can_error_code = HAL_CAN_GetError(hcan);
+    /* HAL accumulates ErrorCode until explicitly reset. Consume the current
+     * callback's vector now so a later RX-only callback cannot replay an old
+     * mailbox-terminal TX bit against a new pending command. */
+    (void)HAL_CAN_ResetError(hcan);
+    canbus_tx_error_isr(&app.board.canbus, app.can_error_code);
     app.canbus_hw_fault = true;
     if((app.can_error_code & HAL_CAN_ERROR_RX_FOV0) != 0u)
     {
         app.can_rx_overrun_count++;
         app.canbus_rx_fault = true;
     }
+}
+
+void HAL_CAN_TxMailbox0CompleteCallback(CAN_HandleTypeDef *hcan)
+{
+    extern app_data_t app;
+    if(hcan == app.board.canbus.hcan)
+        canbus_tx_complete_isr(&app.board.canbus, CAN_TX_MAILBOX0);
+}
+
+void HAL_CAN_TxMailbox1CompleteCallback(CAN_HandleTypeDef *hcan)
+{
+    extern app_data_t app;
+    if(hcan == app.board.canbus.hcan)
+        canbus_tx_complete_isr(&app.board.canbus, CAN_TX_MAILBOX1);
+}
+
+void HAL_CAN_TxMailbox2CompleteCallback(CAN_HandleTypeDef *hcan)
+{
+    extern app_data_t app;
+    if(hcan == app.board.canbus.hcan)
+        canbus_tx_complete_isr(&app.board.canbus, CAN_TX_MAILBOX2);
+}
+
+void HAL_CAN_TxMailbox0AbortCallback(CAN_HandleTypeDef *hcan)
+{
+    extern app_data_t app;
+    if(hcan == app.board.canbus.hcan)
+        canbus_tx_abort_isr(&app.board.canbus, CAN_TX_MAILBOX0);
+}
+
+void HAL_CAN_TxMailbox1AbortCallback(CAN_HandleTypeDef *hcan)
+{
+    extern app_data_t app;
+    if(hcan == app.board.canbus.hcan)
+        canbus_tx_abort_isr(&app.board.canbus, CAN_TX_MAILBOX1);
+}
+
+void HAL_CAN_TxMailbox2AbortCallback(CAN_HandleTypeDef *hcan)
+{
+    extern app_data_t app;
+    if(hcan == app.board.canbus.hcan)
+        canbus_tx_abort_isr(&app.board.canbus, CAN_TX_MAILBOX2);
 }
 
 void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim) {

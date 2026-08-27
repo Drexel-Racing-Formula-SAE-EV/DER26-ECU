@@ -33,6 +33,6 @@ float pressure_sensor_get_percent(pressure_sensor_t *root);
 
 uint8_t pressure_sensor_check_implausibility(float L, float R, int thresh, int count);
 
-uint8_t pressure_sensor_check_failure(float count, int max_thresh, int min_thresh);
+uint8_t pressure_sensor_in_range(float count, int max_thresh, int min_thresh);
 
 #endif

@@ -543,6 +543,125 @@ static void test_current_source_diagnostic_frame_is_advisory(void)
     EXPECT_FALSE(ams.current_diag_sane);
 }
 
+static void test_logger_stream_frames_are_decoded_and_advisory(void)
+{
+    ams_t ams;
+    uint8_t heartbeat[8] = {3u, 17u, 0u, 0u, 0u, 0u, 0u, 0u};
+    uint8_t meta[8] = {2u, 9u, 4u, 6u, 0x01u, 0x02u, 0x03u, 0x04u};
+    uint8_t sample[8] = {0x01u, 0xF4u, 0xFFu, 0x38u,
+                         0x02u, 0x58u, 0x02u, 0x62u};
+    uint8_t health[8] = {0xA5u, 7u, 3u, 6u, 0x12u, 0x34u, 0x00u, 0x64u};
+    uint8_t raw[8] = {0xFFu, 0xFFu, 0xFCu, 0x18u,
+                      0x01u, 0x2Cu, 5u, 1u};
+    uint8_t txsched[8] = {0x00u, 0x02u, 0x00u, 0x07u,
+                          0x00u, 0x03u, 4u, 0x03u};
+    uint8_t vcompare[8] = {2u, 0x17u, 0x00u, 0x0Cu,
+                           0xFFu, 0xE7u, 0x56u, 0x78u};
+
+    ams_init(&ams);
+    bool torque_before = ams_allows_torque(&ams);
+
+    EXPECT_TRUE(ams_is_logger_can_id(AMS_LOGGER_CAN_ID_HEARTBEAT));
+    EXPECT_TRUE(ams_is_logger_can_id(AMS_LOGGER_CAN_ID_APM_RAW));
+    EXPECT_FALSE(ams_is_logger_can_id(AMS_LOGGER_CAN_ID_FIRST - 1u));
+    EXPECT_TRUE(ams_parse_can_frame(&ams, AMS_LOGGER_CAN_ID_HEARTBEAT,
+                                    true, 8u, heartbeat, 100u));
+    EXPECT_TRUE(ams_parse_can_frame(&ams, AMS_LOGGER_CAN_ID_SNAPSHOT_META,
+                                    true, 8u, meta, 101u));
+    EXPECT_TRUE(ams_parse_can_frame(&ams, AMS_LOGGER_CAN_ID_APM_SAMPLE,
+                                    true, 8u, sample, 102u));
+    EXPECT_TRUE(ams_parse_can_frame(&ams, AMS_LOGGER_CAN_ID_APM_HEALTH,
+                                    true, 8u, health, 103u));
+    EXPECT_TRUE(ams_parse_can_frame(&ams, AMS_LOGGER_CAN_ID_APM_RAW,
+                                    true, 8u, raw, 104u));
+    EXPECT_TRUE(ams_parse_can_frame(&ams, AMS_LOGGER_CAN_ID_TX_SCHED_DIAG,
+                                    true, 8u, txsched, 105u));
+    EXPECT_TRUE(ams_parse_can_frame(&ams,
+                                    AMS_LOGGER_CAN_ID_ESTIMATOR_VOLTAGE_COMPARE,
+                                    true, 8u, vcompare, 106u));
+
+    EXPECT_EQ_U32(ams.logger_protocol_version, 3u);
+    EXPECT_EQ_U32(ams.logger_sequence, 17u);
+    EXPECT_EQ_U32(ams.logger_snapshot_sequence, 9u);
+    EXPECT_EQ_U32(ams.logger_phase, 4u);
+    EXPECT_EQ_U32(ams.logger_phase_count, 6u);
+    EXPECT_EQ_U32(ams.logger_measurement_sequence, 0x01020304u);
+    EXPECT_EQ_I16(ams.apm_current1_0p01a, 500);
+    EXPECT_EQ_I16(ams.apm_current2_0p01a, -200);
+    EXPECT_EQ_U32(ams.apm_voltage1_0p1v, 600u);
+    EXPECT_EQ_U32(ams.apm_voltage2_0p1v, 610u);
+    EXPECT_EQ_U32(ams.apm_flags, 0xA5u);
+    EXPECT_EQ_U32(ams.apm_conversion_count, 0x1234u);
+    EXPECT_EQ_U32(ams.apm_sample_age_ms, 100u);
+    EXPECT_TRUE(ams.apm_i1_raw == -1000);
+    EXPECT_EQ_I16(ams.apm_vb1_raw, 300);
+    EXPECT_EQ_U32(ams.apm_i1_phase, 5u);
+    EXPECT_EQ_U32(ams.apm_calibration_profile, 1u);
+    EXPECT_EQ_U32(ams.tx_sched_protected_deadline_miss, 2u);
+    EXPECT_EQ_U32(ams.tx_sched_detail_superseded, 7u);
+    EXPECT_EQ_U32(ams.tx_sched_detail_recovery_discard, 3u);
+    EXPECT_EQ_U32(ams.tx_sched_protected_superseded, 4u);
+    EXPECT_EQ_U32(ams.tx_sched_flags, 0x03u);
+    EXPECT_EQ_U32(ams.estimator_voltage_compare_index, 2u);
+    EXPECT_EQ_U32(ams.estimator_voltage_compare_flags, 0x17u);
+    EXPECT_EQ_I16(ams.estimator_avg_minus_raw_mv, 12);
+    EXPECT_EQ_I16(ams.estimator_iir_minus_raw_mv, -25);
+    EXPECT_EQ_U32(ams.estimator_voltage_compare_sequence, 0x5678u);
+    EXPECT_EQ_U32(ams.logger_rx_count, 7u);
+    EXPECT_EQ_U32(ams.logger_last_id,
+                  AMS_LOGGER_CAN_ID_ESTIMATOR_VOLTAGE_COMPARE);
+    EXPECT_EQ_U32(ams.logger_last_rx_tick, 106u);
+    EXPECT_EQ_U32(ams_allows_torque(&ams), torque_before);
+
+    EXPECT_FALSE(ams_parse_can_frame(&ams, AMS_LOGGER_CAN_ID_APM_SAMPLE,
+                                     true, 7u, sample, 107u));
+    EXPECT_EQ_U32(ams.bad_rx_count, 1u);
+    EXPECT_EQ_I16(ams.apm_current1_0p01a, 500);
+}
+
+static void test_logger_snapshot_gap_and_fragment_observability(void)
+{
+    ams_t ams;
+    uint8_t meta1[8] = {AMS_LOGGER_SNAPSHOT_VERSION_V4, 1u, 0u, NSEGS,
+                        0u, 0u, 0u, 1u};
+    uint8_t meta3[8] = {AMS_LOGGER_SNAPSHOT_VERSION_V4, 3u, 0u, NSEGS,
+                        0u, 0u, 0u, 3u};
+    uint8_t cell1[8] = {0};
+    uint8_t old_cell[8] = {0};
+
+    ams_init(&ams);
+    cell1[0] = (uint8_t)((1u << AMS_LOGGER_PHASE_BITS) | 0u);
+    cell1[1] = 0u;
+    old_cell[0] = cell1[0];
+    old_cell[1] = 3u;
+
+    EXPECT_TRUE(ams_parse_can_frame(&ams, AMS_LOGGER_CAN_ID_SNAPSHOT_META,
+                                    true, 8u, meta1, 10u));
+    EXPECT_TRUE(ams_parse_can_frame(&ams, AMS_LOGGER_CAN_ID_CELL_DETAIL,
+                                    true, 8u, cell1, 11u));
+    EXPECT_TRUE(ams_parse_can_frame(&ams, AMS_LOGGER_CAN_ID_CELL_DETAIL,
+                                    true, 8u, cell1, 12u));
+    EXPECT_EQ_U32(ams.logger_duplicate_fragment_count, 1u);
+
+    /* Advancing 1 -> 3 records one missing source snapshot and finalizes the
+     * incomplete fragment set for snapshot 1 before starting snapshot 3. */
+    EXPECT_TRUE(ams_parse_can_frame(&ams, AMS_LOGGER_CAN_ID_SNAPSHOT_META,
+                                    true, 8u, meta3, 20u));
+    EXPECT_EQ_U32(ams.logger_snapshot_gap_count, 1u);
+    EXPECT_EQ_U32(ams.logger_incomplete_snapshot_count, 1u);
+    EXPECT_EQ_U32(ams.logger_phase_gap_count, 4u);
+    EXPECT_EQ_U32(ams.logger_cell_fragment_gap_count, 24u);
+    EXPECT_EQ_U32(ams.logger_temp_fragment_gap_count, 40u);
+    EXPECT_FALSE(ams.logger_snapshot_complete);
+
+    /* A late modulo-32 fragment from snapshot 1 is observable but cannot
+     * roll the current snapshot tracker backward from snapshot 3. */
+    EXPECT_TRUE(ams_parse_can_frame(&ams, AMS_LOGGER_CAN_ID_CELL_DETAIL,
+                                    true, 8u, old_cell, 21u));
+    EXPECT_EQ_U32(ams.logger_out_of_order_count, 1u);
+    EXPECT_EQ_U8(ams.logger_fragment_seq5, 3u);
+}
+
 static void test_compact_pack_voltage_matches_cell_bounds(void)
 {
     ams_t ams;
@@ -929,6 +1048,8 @@ int main(void)
     run_test("compact status fault flags block torque", test_compact_status_fault_flags_block_torque);
     run_test("compact electrical thermal and health frames", test_compact_electrical_thermal_and_health_frames);
     run_test("current source diagnostic frame is advisory", test_current_source_diagnostic_frame_is_advisory);
+    run_test("logger stream frames decode without torque authority", test_logger_stream_frames_are_decoded_and_advisory);
+    run_test("logger snapshot gaps and fragment loss observable", test_logger_snapshot_gap_and_fragment_observability);
     run_test("compact pack voltage matches cell bounds", test_compact_pack_voltage_matches_cell_bounds);
     run_test("compact status drives stale and sequence checks", test_compact_status_drives_stale_and_sequence_checks);
     run_test("compact summary freshness thermal and sanity gates", test_compact_summary_freshness_thermal_and_sanity_gates);

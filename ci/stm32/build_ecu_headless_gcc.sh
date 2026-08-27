@@ -59,11 +59,16 @@ INCLUDES=(
   -I"$ROOT_DIR/Middlewares/Third_Party/FreeRTOS/Source/include"
   -I"$ROOT_DIR/Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2"
   -I"$ROOT_DIR/Middlewares/Third_Party/FreeRTOS/Source/portable/GCC/ARM_CM7/r0p1"
+  -I"$ROOT_DIR/FATFS/App"
+  -I"$ROOT_DIR/FATFS/Target"
+  -I"$ROOT_DIR/Middlewares/Third_Party/FatFs/src"
 )
 
 SOURCES=()
 while IFS= read -r src; do SOURCES+=("$src"); done < <(find "$ROOT_DIR/Core/Src" -name "*.c" -print | sort)
 while IFS= read -r src; do SOURCES+=("$src"); done < <(find "$ROOT_DIR/Drivers/STM32F7xx_HAL_Driver/Src" -name "*.c" -print | sort)
+while IFS= read -r src; do SOURCES+=("$src"); done < <(find "$ROOT_DIR/FATFS" -name "*.c" -print | sort)
+while IFS= read -r src; do SOURCES+=("$src"); done < <(find "$ROOT_DIR/Middlewares/Third_Party/FatFs/src" -name "*.c" -print | sort)
 
 FREERTOS_SOURCES=(
   "$ROOT_DIR/Middlewares/Third_Party/FreeRTOS/Source/croutine.c"

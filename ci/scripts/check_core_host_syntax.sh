@@ -28,6 +28,10 @@ INCLUDES=(
   -I"$ROOT_DIR/Core/Inc"
   -I"$ROOT_DIR/Core/Inc/ext_drivers"
   -I"$ROOT_DIR/Core/Inc/tasks"
+  -I"$ROOT_DIR/Core/Inc/power"
+  -I"$ROOT_DIR/FATFS/App"
+  -I"$ROOT_DIR/FATFS/Target"
+  -I"$ROOT_DIR/Middlewares/Third_Party/FatFs/src"
   -I"$ROOT_DIR/Drivers/STM32F7xx_HAL_Driver/Inc"
   -I"$ROOT_DIR/Drivers/STM32F7xx_HAL_Driver/Inc/Legacy"
   -I"$ROOT_DIR/Drivers/CMSIS/Device/ST/STM32F7xx/Include"
@@ -41,10 +45,12 @@ SOURCES=()
 while IFS= read -r src; do SOURCES+=("$src"); done < <(find "$ROOT_DIR/Core/Src" -name "*.c" -print | sort)
 
 "$CC_BIN" "${COMMON[@]}" -DECU_BUILD_PROFILE=0 "${INCLUDES[@]}" "${SOURCES[@]}"
+"$CC_BIN" "${COMMON[@]}" -DECU_BUILD_PROFILE=2 "${INCLUDES[@]}" "${SOURCES[@]}"
 
-# The implementation latch is now source-owned and enabled. The default
-# vehicle profile must still fail because external BSPD, CM200, and clamp
-# validation evidence is absent.
+# The implementation latch is source-owned and enabled. The BSPD interface is
+# recorded as corrected/validated in this source package, but the default
+# vehicle profile must still fail because CM200, clamp, and full release
+# validation evidence remain absent.
 vehicle_error="$(mktemp)"
 trap 'rm -f "$vehicle_error"' EXIT
 if "$CC_BIN" "${COMMON[@]}" -DECU_BUILD_PROFILE=1 \
@@ -52,11 +58,16 @@ if "$CC_BIN" "${COMMON[@]}" -DECU_BUILD_PROFILE=1 \
   echo "ERROR: default vehicle profile compiled without external evidence"
   exit 1
 fi
-if ! grep -q "Vehicle profile requires a validated 12 V BSPD-OK" "$vehicle_error"; then
-  echo "ERROR: default vehicle profile failed for an unexpected reason"
-  cat "$vehicle_error"
-  exit 1
-fi
+for expected in \
+  "Vehicle profile requires validated CM200 broadcast IDs/rates/mode/counter settings" \
+  "Vehicle profile requires validation evidence for the conservative AMS DCL/CCL torque clamp" \
+  "Vehicle profile requires complete ECU pin/input/current/cooling/RTOS/WCET/CAN/watchdog release evidence"; do
+  if ! grep -q "$expected" "$vehicle_error"; then
+    echo "ERROR: default vehicle profile did not fail on expected evidence lock: $expected"
+    cat "$vehicle_error"
+    exit 1
+  fi
+done
 
 # A fully acknowledged profile must parse now that the implementation exists.
 "$CC_BIN" "${COMMON[@]}" -DECU_BUILD_PROFILE=1 \
@@ -70,6 +81,8 @@ fi
   -DECU_AMS_PROTOCOL_VALIDATED=1 \
   -DECU_CURRENT_MODEL_VALIDATED=1 \
   -DECU_CURRENT_RESIDUAL_VALIDATED=1 \
+  -DECU_CURRENT_RESIDUAL_UNCERTAINTY_NEG_0P1A=10 \
+  -DECU_CURRENT_RESIDUAL_UNCERTAINTY_POS_0P1A=10 \
   -DECU_COOLING_VALIDATED=1 \
   -DECU_RTOS_MEMORY_VALIDATED=1 \
   -DECU_WCET_VALIDATED=1 \
@@ -78,4 +91,4 @@ fi
   -DECU_SAFE_OUTPUTS_VALIDATED=1 \
   "${INCLUDES[@]}" "${SOURCES[@]}"
 
-echo "Full ECU application syntax check passed for bench and fully acknowledged vehicle profiles (${#SOURCES[@]} files); default vehicle evidence locks remain active."
+echo "Full ECU application syntax check passed for bench, testday and fully acknowledged vehicle profiles (${#SOURCES[@]} files); default vehicle evidence locks remain active."

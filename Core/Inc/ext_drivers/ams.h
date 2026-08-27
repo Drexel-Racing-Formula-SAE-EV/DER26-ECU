@@ -18,9 +18,12 @@
 #define NVOLTS 15
 #define NTEMPS 24
 
-/* Legacy paged AMS telemetry. Kept for bench compatibility. */
-#define AMS_TELEM_CANBUS_ID 0x69u
-#define AMS_ESTIMATOR_CANBUS_ID 0x421u
+/* Legacy bulk telemetry is retired by DER26-CAN-V4 because it
+ * numerically outranked protected battery-authority traffic. The parser may
+ * remain for offline/backward compatibility, but production CAN filters do
+ * not accept it. */
+#define AMS_TELEM_CANBUS_ID 0x6B1u
+#define AMS_ESTIMATOR_CANBUS_ID 0x6B2u
 #define AMS_PACKET_COUNT 72u
 
 /* Compact AMS->ECU frames from the hardened AMS firmware. */
@@ -30,6 +33,56 @@
 #define AMS_ECU_HEALTH_CANBUS_ID 0x683u
 #define AMS_ECU_CURRENT_DIAG_CANBUS_ID 0x68Bu
 #define AMS_ECU_COMPACT_PROTOCOL_VERSION 1u
+
+/* Passive AMS diagnostic/logger range. These frames are recorded and decoded
+ * for observability only; they never participate in ECU torque permission. */
+#define AMS_LOGGER_CAN_ID_FIRST 0x690u
+#define AMS_LOGGER_CAN_ID_HEARTBEAT 0x690u
+#define AMS_LOGGER_CAN_ID_CELL_DETAIL 0x6A0u
+#define AMS_LOGGER_CAN_ID_TEMP_DETAIL 0x6A1u
+#define AMS_LOGGER_CAN_ID_VOLTAGE_MASKS 0x6A2u
+#define AMS_LOGGER_CAN_ID_TEMP_MASKS_A 0x6A3u
+#define AMS_LOGGER_CAN_ID_TEMP_MASKS_B 0x6A4u
+#define AMS_LOGGER_CAN_ID_VOLTAGE_PEC 0x6A5u
+#define AMS_LOGGER_CAN_ID_TEMP_DIAG_A 0x6A9u
+#define AMS_LOGGER_CAN_ID_TEMP_DIAG_B 0x6AAu
+#define AMS_LOGGER_CAN_ID_VOLTAGE_DIAG 0x6ABu
+#define AMS_LOGGER_CAN_ID_SNAPSHOT_META 0x6ADu
+#define AMS_LOGGER_CAN_ID_APM_SAMPLE 0x6AEu
+#define AMS_LOGGER_CAN_ID_APM_HEALTH 0x6AFu
+#define AMS_LOGGER_CAN_ID_APM_RAW 0x6B0u
+#define AMS_LOGGER_CAN_ID_TX_SCHED_DIAG 0x6B3u
+#define AMS_LOGGER_CAN_ID_ESTIMATOR_VOLTAGE_COMPARE 0x6B4u
+#define AMS_LOGGER_CAN_ID_EKF_STATE 0x6B5u
+#define AMS_LOGGER_CAN_ID_EKF_MODEL 0x6B6u
+#define AMS_LOGGER_CAN_ID_EKF_COVARIANCE 0x6B7u
+#define AMS_LOGGER_CAN_ID_EKF_SOH 0x6B8u
+#define AMS_LOGGER_CAN_ID_EKF_CONTEXT 0x6B9u
+#define AMS_LOGGER_CAN_ID_SOP_DISCHARGE 0x6BAu
+#define AMS_LOGGER_CAN_ID_SOP_CHARGE 0x6BBu
+#define AMS_LOGGER_CAN_ID_SOP_BINDING 0x6BCu
+#define AMS_LOGGER_CAN_ID_FUSE_STATE 0x6BDu
+#define AMS_LOGGER_CAN_ID_FUSE_LIMIT 0x6BEu
+#define AMS_LOGGER_CAN_ID_TUNING_META 0x6BFu
+#define AMS_LOGGER_CAN_ID_SOP_META 0x6C0u
+#define AMS_LOGGER_CAN_ID_LAST 0x6C0u
+#define AMS_LOGGER_PROTOCOL_VERSION_V4 3u
+#define AMS_LOGGER_SNAPSHOT_VERSION_V4 2u
+#define AMS_LOGGER_PHASE_BITS 3u
+#define AMS_LOGGER_PHASE_MASK 0x07u
+#define AMS_LOGGER_FRAGMENT_SEQ_MASK 0x1Fu
+#define AMS_ECU_DIAG_FEEDBACK_CAN_ID 0x6F0u
+#define AMS_ECU_DIAG_FEEDBACK_VERSION 1u
+
+static inline uint8_t ams_logger_phase_from_tag(uint8_t tag)
+{
+    return (uint8_t)(tag & AMS_LOGGER_PHASE_MASK);
+}
+static inline uint8_t ams_logger_seq5_from_tag(uint8_t tag)
+{
+    return (uint8_t)((tag >> AMS_LOGGER_PHASE_BITS) &
+                     AMS_LOGGER_FRAGMENT_SEQ_MASK);
+}
 
 /* Authoritative SoP/SoH protocol v2 from AMS v0.3.3+. */
 #ifndef AMS_POWER_AUTHORITY_REQUIRED_FOR_TORQUE
@@ -190,6 +243,58 @@ typedef struct
     uint32_t current_diag_rx_count;
     uint32_t last_current_diag_rx_tick;
 
+    /* Passive 0x690-0x6C0 logger stream health and selected decoded APM/data.
+     * This block is diagnostic-only and intentionally excluded from
+     * ams_allows_torque(). */
+    uint8_t logger_protocol_version;
+    uint8_t logger_sequence;
+    uint8_t logger_snapshot_version;
+    uint8_t logger_snapshot_sequence;
+    uint8_t logger_phase;
+    uint8_t logger_phase_count;
+    uint32_t logger_measurement_sequence;
+    uint32_t logger_rx_count;
+    uint32_t logger_bad_count;
+    uint32_t logger_last_rx_tick;
+    uint16_t logger_last_id;
+    bool logger_fragment_seq_valid;
+    uint8_t logger_fragment_seq5;
+    uint8_t logger_phase_seen_mask;
+    uint8_t logger_cell_fragment_mask[NSEGS];
+    uint8_t logger_temp_fragment_mask[NSEGS];
+    bool logger_snapshot_complete;
+    uint32_t logger_snapshot_gap_count;
+    uint32_t logger_incomplete_snapshot_count;
+    uint32_t logger_phase_gap_count;
+    uint32_t logger_cell_fragment_gap_count;
+    uint32_t logger_temp_fragment_gap_count;
+    uint32_t logger_duplicate_fragment_count;
+    uint32_t logger_out_of_order_count;
+    uint16_t tx_sched_protected_deadline_miss;
+    uint16_t tx_sched_detail_superseded;
+    uint16_t tx_sched_detail_recovery_discard;
+    uint8_t tx_sched_protected_superseded;
+    uint8_t tx_sched_flags;
+    uint8_t estimator_voltage_compare_index;
+    uint8_t estimator_voltage_compare_flags;
+    int16_t estimator_avg_minus_raw_mv;
+    int16_t estimator_iir_minus_raw_mv;
+    uint16_t estimator_voltage_compare_sequence;
+    int16_t apm_current1_0p01a;
+    int16_t apm_current2_0p01a;
+    uint16_t apm_voltage1_0p1v;
+    uint16_t apm_voltage2_0p1v;
+    uint8_t apm_flags;
+    uint8_t apm_stage;
+    uint8_t apm_reason;
+    uint8_t apm_device_id;
+    uint16_t apm_conversion_count;
+    uint16_t apm_sample_age_ms;
+    int32_t apm_i1_raw;
+    int16_t apm_vb1_raw;
+    uint8_t apm_i1_phase;
+    uint8_t apm_calibration_profile;
+
     /* Authoritative dynamic power envelope (0x684-0x687) plus optional
      * strategy/resource (0x689) and binding metadata (0x68A). */
     der26_power_consumer_t power_consumer;
@@ -210,6 +315,7 @@ bool ams_parse_telemetry_frame(ams_t *dev, const uint8_t *data, uint8_t dlc, uin
 bool ams_parse_estimator_frame(ams_t *dev, const uint8_t *data, uint8_t dlc, uint32_t now_ms);
 bool ams_parse_can_frame(ams_t *dev, uint32_t std_id, bool is_standard, uint8_t dlc, const uint8_t *data, uint32_t now_ms);
 bool ams_is_known_can_id(uint32_t std_id);
+bool ams_is_logger_can_id(uint32_t std_id);
 void ams_invalidate_can_frame(ams_t *dev, uint32_t std_id);
 void ams_update_stale(ams_t *dev, uint32_t now_ms);
 bool ams_allows_torque(const ams_t *dev);

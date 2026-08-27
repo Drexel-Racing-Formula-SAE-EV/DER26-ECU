@@ -19,6 +19,8 @@ void poten_init(poten_t *poten, uint16_t min, uint16_t max, ADC_HandleTypeDef *h
 	poten->min = min;
 	poten->max = max;
 	poten->handle = handle;
+	poten->count = 0u;
+	poten->percent = 0.0f;
 	poten->hist_count = 0u;
 	for(int i = 0; i < HISTSZ; i++) poten->hist[i] = 0;
 }
@@ -65,6 +67,7 @@ float poten_get_percent(poten_t *root) {
 
 uint16_t poten_percent_to_hex(float percent)
 {
+    if(!isfinite(percent)) return 0u;
     if (percent > 100) percent = 100.0;
     if (percent < 0) percent = 0.0;
     return (uint16_t)((percent * 65535.0f / 100.0f) + 0.5f);

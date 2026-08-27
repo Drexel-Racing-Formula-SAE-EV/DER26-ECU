@@ -25,8 +25,26 @@
 #include "power/ecu_torque_clamp.h"
 
 #define VER_MAJOR 2
-#define VER_MINOR 6
-#define VER_BUG   2
+#define VER_MINOR 10
+#define VER_BUG   7
+
+#define DER26_CAN_CONTRACT_NAME "DER26-CAN-V4"
+
+/* DER26-CAN-V4 nominal vehicle bitrate. The asynchronous AMS scheduler is
+ * required to remain correct at 250 kbps; 500 kbps is vehicle headroom. */
+#ifndef DER26_CAN_BITRATE_KBPS
+#define DER26_CAN_BITRATE_KBPS 500u
+#endif
+#if DER26_CAN_BITRATE_KBPS == 500u
+#define DER26_CAN_PRESCALER 6u
+#elif DER26_CAN_BITRATE_KBPS == 250u
+#define DER26_CAN_PRESCALER 12u
+#else
+#error "DER26 CAN supports only validated 250 or 500 kbps timing"
+#endif
+#define DER26_CAN_SJW CAN_SJW_2TQ
+#define DER26_CAN_BS1 CAN_BS1_15TQ
+#define DER26_CAN_BS2 CAN_BS2_2TQ
 
 #define PLAUSIBILITY_THRESH 10
 #define BRAKE_LIGHT_THRESH 5
@@ -57,6 +75,7 @@
 #define ECU_STACK_ACC_WORDS        256u
 #define ECU_STACK_DASH_WORDS       256u
 #define ECU_STACK_COOL_WORDS       256u
+#define ECU_STACK_LOGGER_WORDS    1536u
 
 #define ERR_PRIO 17
 #define RTD_PRIO 15
@@ -68,6 +87,7 @@
 #define ACC_PRIO 5
 #define DASH_PRIO 4
 #define COOL_PRIO 3
+#define LOGGER_PRIO 2
 
 #define MAXTRQ 200 /* Maximum requested motoring torque in Nm at 100% APPS. */
 
@@ -115,6 +135,12 @@ typedef struct {
 	volatile bool rtd_trip_pulse_requested;
 	volatile uint32_t can_error_code;
 	volatile uint32_t can_rx_overrun_count;
+	/* Target-only CAN RX ISR timing/backlog evidence. These counters are
+	 * diagnostic and never grant torque authority. */
+	volatile uint32_t can_rx_isr_callback_count;
+	volatile uint32_t can_rx_isr_last_cycles;
+	volatile uint32_t can_rx_isr_max_cycles;
+	volatile uint32_t can_rx_isr_budget_exhaust_count;
 	volatile uint32_t can_recovery_count;
 	uint32_t reset_cause;
 	volatile uint8_t cm200_rolling_counter;
@@ -136,6 +162,13 @@ typedef struct {
 	volatile uint32_t torque_clamp_last_cycles;
 	volatile uint32_t torque_clamp_max_cycles;
 	volatile uint32_t torque_clamp_soft_overrun_count;
+	/* Final CAN commit critical-section timing. This includes the last AMS/CM200
+	 * authority re-read, comparison-only clamp verification and non-blocking
+	 * HAL CAN mailbox enqueue. It is target evidence only and never grants
+	 * torque authority. */
+	volatile uint32_t torque_commit_count;
+	volatile uint32_t torque_commit_last_cycles;
+	volatile uint32_t torque_commit_max_cycles;
 	ecu_pack_current_calibration_runtime_t pack_current_calibration_runtime;
 	ecu_torque_clamp_state_t torque_clamp_state;
 	ecu_current_residual_monitor_t current_residual_monitor;
@@ -157,6 +190,13 @@ typedef struct {
 	float coolant_temp_in;
 	float coolant_temp_out;
 	bool coolant_telemetry_valid;
+	volatile uint16_t coolant_fault_flags;
+	volatile uint8_t coolant_pump_mode; /* 0=auto, 1=failsafe max, 2=manual */
+	float coolant_pump_manual_percent;
+	float coolant_pump_command_percent;
+	float coolant_pump_s_duty_percent;
+	float coolant_pump_gate_duty_percent;
+	volatile uint8_t coolant_pump_flags;
 
 	board_t board;
 	datetime_t datetime;
@@ -172,7 +212,10 @@ typedef struct {
 	TaskHandle_t acc_task;
 	TaskHandle_t dashboard_task;
 	TaskHandle_t cool_task;
+	TaskHandle_t logger_task;
 } app_data_t;
+
+extern app_data_t app;
 
 void app_create();
 void cli_putline(char *line);

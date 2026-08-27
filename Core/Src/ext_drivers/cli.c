@@ -53,13 +53,20 @@ int cli_printline(cli_t *dev, char *line)
 
 int tokenize(char *s, char *toks[], int maxtoks, char *delim)
 {
-	int i = 0;
+	int count = 0;
+	char *tok;
 
-	toks[i] = (char *)strtok(s, delim);
-	while(toks[i++] != NULL)
+	if((s == NULL) || (toks == NULL) || (delim == NULL) || (maxtoks <= 0))
 	{
-		if(i >= maxtoks - 1) toks[i] = NULL;
-		else toks[i] = (char *)strtok(NULL, delim);
+		return 0;
 	}
-	return i - 1;
+
+	tok = strtok(s, delim);
+	while((tok != NULL) && (count < (maxtoks - 1)))
+	{
+		toks[count++] = tok;
+		tok = strtok(NULL, delim);
+	}
+	toks[count] = NULL;
+	return count;
 }

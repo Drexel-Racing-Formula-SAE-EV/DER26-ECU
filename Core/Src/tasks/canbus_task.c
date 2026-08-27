@@ -12,6 +12,9 @@
 #include "ext_drivers/canbus.h"
 #include "ext_drivers/cm200.h"
 #include "ext_drivers/ecu_safety.h"
+#include "ext_drivers/stm32f767.h"
+#include "ext_drivers/ams.h"
+#include "ext_drivers/ecu_data_logger.h"
 #include "power/ecu_pack_current_calibration.h"
 
 #define CANBUS_COMMAND_WAIT_MS 25u
@@ -22,10 +25,13 @@ static const ecu_current_residual_config_t current_residual_config = {
     .source_settling_samples = 5u,
     .maximum_measurement_age_us = 200000u,
     .maximum_alignment_error_us = 150000u,
-    /* Provisional. Replace with the worst certified DHAB/APM canonical
-     * measurement interval before vehicle validation. */
-    .measurement_uncertainty_negative_a = 0.0f,
-    .measurement_uncertainty_positive_a = 0.0f,
+    /* Bench defaults remain zero. Vehicle builds cannot claim residual
+     * validation until measured directional uncertainty is supplied through
+     * the release-profile macros in ecu_config.h. */
+    .measurement_uncertainty_negative_a =
+        (float)ECU_CURRENT_RESIDUAL_UNCERTAINTY_NEG_0P1A / 10.0f,
+    .measurement_uncertainty_positive_a =
+        (float)ECU_CURRENT_RESIDUAL_UNCERTAINTY_POS_0P1A / 10.0f,
     .latch_until_reset = true,
 };
 
@@ -250,6 +256,85 @@ static void update_current_residual_monitor(app_data_t *data, uint32_t now_ms)
         data->current_residual_monitor.violation_count;
 }
 
+static uint16_t sat_u16_u32(uint32_t value)
+{
+    return (value > UINT16_MAX) ? UINT16_MAX : (uint16_t)value;
+}
+
+static void canbus_try_send_ams_feedback(app_data_t *data,
+                                         canbus_t *canbus,
+                                         uint32_t now_ms)
+{
+    if((data == NULL) || (canbus == NULL) || (canbus->hcan == NULL))
+    {
+        return;
+    }
+    if((uint32_t)(now_ms - canbus->feedback_last_tx_tick) <
+       CANBUS_AMS_FEEDBACK_PERIOD_MS)
+    {
+        return;
+    }
+
+    /* This is observability only. CM200 torque always gets the first TX
+     * opportunity in the task. If no mailbox is immediately free, defer the
+     * diagnostic frame rather than waiting or perturbing the torque path. */
+    if(HAL_CAN_GetTxMailboxesFreeLevel(canbus->hcan) == 0u)
+    {
+        if(canbus->feedback_tx_deferred_count != UINT32_MAX)
+        {
+            canbus->feedback_tx_deferred_count++;
+        }
+        return;
+    }
+
+    ecu_data_logger_diag_t logger_diag;
+    memset(&logger_diag, 0, sizeof(logger_diag));
+    ecu_data_logger_get_diag(&logger_diag);
+
+    canbus_packet_t packet;
+    memset(&packet, 0, sizeof(packet));
+    packet.id = AMS_ECU_DIAG_FEEDBACK_CAN_ID;
+    packet.data[0] = AMS_ECU_DIAG_FEEDBACK_VERSION;
+    packet.data[1] = data->board.ams.compact_sequence;
+    packet.data[2] = data->board.ams.logger_snapshot_sequence;
+    packet.data[3] =
+        (uint8_t)((!data->board.ams.stale ? 1u : 0u) |
+                  ((data->board.ams.power_authority_valid &&
+                    !data->board.ams.power_authority_stale) ? 2u : 0u) |
+                  (data->board.ams.logger_snapshot_complete ? 4u : 0u) |
+                  ((logger_diag.raw_dropped != 0u) ? 8u : 0u));
+
+    uint16_t rx_diag = sat_u16_u32(
+        canbus->rx_malformed_count + data->can_rx_overrun_count +
+        logger_diag.raw_dropped);
+    packet.data[4] = (uint8_t)(rx_diag >> 8u);
+    packet.data[5] = (uint8_t)rx_diag;
+    uint16_t uptime_s = (uint16_t)((now_ms / 1000u) & 0xFFFFu);
+    packet.data[6] = (uint8_t)(uptime_s >> 8u);
+    packet.data[7] = (uint8_t)uptime_s;
+
+    HAL_StatusTypeDef status = canbus_transmit_ready(canbus, &packet);
+    if(status == HAL_OK)
+    {
+        canbus->feedback_last_tx_tick = now_ms;
+        if(canbus->feedback_tx_count != UINT32_MAX)
+        {
+            canbus->feedback_tx_count++;
+        }
+    }
+    else if(status == HAL_BUSY)
+    {
+        if(canbus->feedback_tx_deferred_count != UINT32_MAX)
+        {
+            canbus->feedback_tx_deferred_count++;
+        }
+    }
+    else if(canbus->feedback_tx_error_count != UINT32_MAX)
+    {
+        canbus->feedback_tx_error_count++;
+    }
+}
+
 TaskHandle_t canbus_task_start(app_data_t *data)
 {
     if(data == NULL)
@@ -300,11 +385,33 @@ void canbus_task_fn(void *arg)
             ecu_cm200_build_disable_packet(request.packet.data);
         }
 
+        const bool wait_dwt_available = stm32f767_cycle_counter_available();
+        const uint32_t wait_start_cycles = stm32f767_cycle_counter_read();
+        canbus->tx_wait_count++;
         HAL_StatusTypeDef tx_status =
-            canbus_wait_tx_ready(canbus, CANBUS_TX_TIMEOUT_MS);
+            canbus_wait_tx_ready(canbus, CANBUS_CM200_COMMIT_WAIT_MS);
+        if(wait_dwt_available)
+        {
+            const uint32_t wait_cycles =
+                (uint32_t)(stm32f767_cycle_counter_read() - wait_start_cycles);
+            canbus->tx_wait_last_cycles = wait_cycles;
+            if(wait_cycles > canbus->tx_wait_max_cycles)
+            {
+                canbus->tx_wait_max_cycles = wait_cycles;
+            }
+        }
         if(tx_status != HAL_OK)
         {
+            /* Bounded mailbox wait is part of the protected commit contract.
+             * Expiry never leaves the task blocked: immediately publish the
+             * local fail-zero state and let the next available command slot
+             * carry a disable frame. */
+            if(tx_status == HAL_TIMEOUT)
+            {
+                canbus->tx_wait_timeout_count++;
+            }
             data->canbus_tx_fault = true;
+            data->cm200_command_torque_0p1nm = 0;
             update_current_residual_monitor(data, HAL_GetTick());
             continue;
         }
@@ -320,7 +427,11 @@ void canbus_task_fn(void *arg)
 
             /* Final protected commit: after mailbox wait, freeze CAN RX and
              * task-owned safety state, obtain a coherent latest snapshot,
-             * compare cached intervals only, then enqueue the actual packet. */
+             * compare cached intervals only, then enqueue the actual packet.
+             * Measure this separately from the APPS-side model/search WCET so
+             * vehicle evidence covers the interrupt-masked commit window too. */
+            const bool commit_dwt_available = stm32f767_cycle_counter_available();
+            const uint32_t commit_start_cycles = stm32f767_cycle_counter_read();
             taskENTER_CRITICAL();
             commit_now_ms = HAL_GetTick();
 
@@ -396,15 +507,44 @@ void canbus_task_fn(void *arg)
 
             ecu_cm200_apply_rolling_counter(request.packet.data,
                                             transmitted_counter);
-            tx_status = canbus_transmit_ready(canbus, &request.packet);
+            uint32_t transmitted_mailbox = 0u;
+            tx_status = canbus_transmit_ready_tracked(
+                canbus, &request.packet, &transmitted_mailbox);
+            taskEXIT_CRITICAL();
+            if(commit_dwt_available)
+            {
+                const uint32_t commit_elapsed_cycles =
+                    (uint32_t)(stm32f767_cycle_counter_read() -
+                               commit_start_cycles);
+                data->torque_commit_last_cycles = commit_elapsed_cycles;
+                if(commit_elapsed_cycles > data->torque_commit_max_cycles)
+                {
+                    data->torque_commit_max_cycles = commit_elapsed_cycles;
+                }
+            }
+            if(data->torque_commit_count != UINT32_MAX)
+            {
+                data->torque_commit_count++;
+            }
+
             if(tx_status == HAL_OK)
             {
+                tx_status = canbus_wait_tx_complete(
+                    canbus, transmitted_mailbox,
+                    CANBUS_CM200_TX_COMPLETE_TIMEOUT_MS);
+            }
+
+            if(tx_status == HAL_OK)
+            {
+                /* Only a real bxCAN RQCP/TXOK callback commits physical
+                 * command history, residual prediction or rolling counter. */
+                const uint32_t complete_now_ms = HAL_GetTick();
+                taskENTER_CRITICAL();
                 cm200_note_command_tx(&data->board.cm200,
                                       transmitted_counter,
                                       committed_0p1nm != 0,
                                       committed_0p1nm,
-                                      commit_now_ms);
-
+                                      complete_now_ms);
                 const bool steady_current_consistent =
                     data->current_residual_monitor.latest_sample_valid &&
                     data->current_residual_monitor.latest_sample_within_envelope &&
@@ -414,11 +554,10 @@ void canbus_task_fn(void *arg)
                     candidate,
                     committed_torque_nm,
                     commit_reason,
-                    commit_now_ms * 1000u,
+                    complete_now_ms * 1000u,
                     physical_zero_confirmed_locked(data),
                     steady_current_consistent,
                     &data->pack_current_calibration_runtime);
-
                 data->cm200_command_torque_0p1nm = committed_0p1nm;
                 data->torque_clamp_reason = (uint8_t)commit_reason;
                 if(candidate != NULL)
@@ -430,14 +569,17 @@ void canbus_task_fn(void *arg)
                 }
                 publish_prediction_locked(data, candidate,
                                           committed_torque_nm,
-                                          commit_now_ms * 1000u);
-            }
-            taskEXIT_CRITICAL();
-
-            if(tx_status == HAL_OK)
-            {
+                                          complete_now_ms * 1000u);
                 data->cm200_rolling_counter =
                     ecu_cm200_next_rolling_counter(transmitted_counter);
+                taskEXIT_CRITICAL();
+            }
+            else
+            {
+                /* Completion is uncertain or explicitly aborted. Keep the
+                 * physical state uncommitted and force zero until the next
+                 * successfully completed disable/torque frame. */
+                data->cm200_command_torque_0p1nm = 0;
             }
         }
         else
@@ -464,6 +606,7 @@ void canbus_task_fn(void *arg)
             data->can_error_code = HAL_CAN_ERROR_NONE;
         }
 
+        canbus_try_send_ams_feedback(data, canbus, HAL_GetTick());
         update_current_residual_monitor(data, HAL_GetTick());
     }
 }

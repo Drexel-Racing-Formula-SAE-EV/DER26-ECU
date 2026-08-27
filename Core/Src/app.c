@@ -23,17 +23,51 @@
 #include "tasks/dashboard_task.h"
 #include "tasks/cool_task.h"
 #include "power/ecu_pack_current_calibration.h"
+#include "ext_drivers/sdcard_service.h"
+#include "ext_drivers/ecu_data_logger.h"
 
 app_data_t app = {0};
 
 void ecu_force_safe_outputs(void)
 {
-    /* Direct BSRR writes are deterministic and do not depend on scheduler or
-     * HAL state. They are also harmless if invoked before GPIO clocks start. */
-    Firmware_Ok_GPIO_Port->BSRR = ((uint32_t)Firmware_Ok_Pin << 16u);
-    MTR_EN_GPIO_Port->BSRR = ((uint32_t)MTR_EN_Pin << 16u);
-    Cascadia_ON_GPIO_Port->BSRR = ((uint32_t)Cascadia_ON_Pin << 16u);
-    Buzzer_GPIO_Port->BSRR = ((uint32_t)Buzzer_Pin << 16u);
+    /* This primitive is also used by early startup failures.  Do not assume
+     * MX_GPIO_Init() has run: first clock every port that contains a safety
+     * output, preload the output data latches low, then force the pins into
+     * push-pull output mode.  The second BSRR write after MODER is deliberate
+     * defense-in-depth against a partially initialized peripheral state. */
+    RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN |
+                    RCC_AHB1ENR_GPIOBEN |
+                    RCC_AHB1ENR_GPIOFEN;
+    (void)RCC->AHB1ENR;
+
+    GPIOA->BSRR = ((uint32_t)(Firmware_Ok_Pin | Cascadia_ON_Pin) << 16u);
+    GPIOF->BSRR = ((uint32_t)(MTR_EN_Pin | Buzzer_Pin) << 16u);
+
+    GPIOA->MODER = (GPIOA->MODER &
+                    ~((3u << (5u * 2u)) | (3u << (7u * 2u)))) |
+                   (1u << (5u * 2u)) | (1u << (7u * 2u));
+    GPIOA->OTYPER &= ~(GPIO_OTYPER_OT_5 | GPIO_OTYPER_OT_7);
+    GPIOF->MODER = (GPIOF->MODER &
+                    ~((3u << (10u * 2u)) | (3u << (13u * 2u)))) |
+                   (1u << (10u * 2u)) | (1u << (13u * 2u));
+    GPIOF->OTYPER &= ~(GPIO_OTYPER_OT_10 | GPIO_OTYPER_OT_13);
+
+    GPIOA->BSRR = ((uint32_t)(Firmware_Ok_Pin | Cascadia_ON_Pin) << 16u);
+    GPIOF->BSRR = ((uint32_t)(MTR_EN_Pin | Buzzer_Pin) << 16u);
+
+    /* PB8 drives an inverting low-side switch on the coolant pump S input.
+     * Gate-low releases S and deliberately invokes the pump's no-valid-PWM /
+     * full-speed fallback. HardFault/assert/startup-failure therefore cannot
+     * leave a partial-speed TIM4 waveform running. */
+    if((RCC->APB1ENR & RCC_APB1ENR_TIM4EN) != 0u)
+    {
+        TIM4->CCER &= ~TIM_CCER_CC3E;
+    }
+    GPIOB->BSRR = ((uint32_t)GPIO_PIN_8 << 16u);
+    GPIOB->MODER = (GPIOB->MODER & ~(3u << (8u * 2u))) |
+                   (1u << (8u * 2u));
+    GPIOB->OTYPER &= ~GPIO_OTYPER_OT_8;
+    GPIOB->BSRR = ((uint32_t)GPIO_PIN_8 << 16u);
 }
 
 void ecu_watchdog_init(void)
@@ -124,6 +158,9 @@ void app_create()
 	app.torque_clamp_last_cycles = 0u;
 	app.torque_clamp_max_cycles = 0u;
 	app.torque_clamp_soft_overrun_count = 0u;
+	app.torque_commit_count = 0u;
+	app.torque_commit_last_cycles = 0u;
+	app.torque_commit_max_cycles = 0u;
 	app.battery_authority_state =
 		(uint8_t)ECU_BATTERY_AUTHORITY_TORQUE_EXHAUSTED;
 	(void)ecu_pack_current_calibration_qualify(
@@ -137,11 +174,20 @@ void app_create()
 	app.coolant_temp_in = 0.0;
 	app.coolant_temp_out = 0.0;
 	app.coolant_telemetry_valid = false;
+	app.coolant_fault_flags = 0u;
+	app.coolant_pump_mode = 0u;
+	app.coolant_pump_manual_percent = 100.0f;
+	app.coolant_pump_command_percent = 100.0f;
+	app.coolant_pump_s_duty_percent = 100.0f;
+	app.coolant_pump_gate_duty_percent = 0.0f;
+	app.coolant_pump_flags = 0u;
 
 	app.throttle = 0;
 	app.brake = 0;
 
 	board_init(&app.board);
+	sdcard_service_init();
+	ecu_data_logger_init();
 	ecu_force_safe_outputs();
 	set_cascadia_enable(0);
 	set_cascadia_on(0);
@@ -153,6 +199,7 @@ void app_create()
 	{
 		app.canbus_hw_fault =
 			(HAL_CAN_ActivateNotification(app.board.canbus.hcan,
+			     CAN_IT_TX_MAILBOX_EMPTY |
 			     CAN_IT_RX_FIFO0_MSG_PENDING |
 			     CAN_IT_RX_FIFO0_OVERRUN |
 			     CAN_IT_ERROR_WARNING |
@@ -178,6 +225,7 @@ void app_create()
 	app.acc_task = acc_task_start(&app);
 	app.dashboard_task = dashboard_task_start(&app);
 	app.cool_task = cool_task_start(&app);
+	app.logger_task = ecu_data_logger_task_start(&app);
 
 	app.startup_fault = ((app.cli_task == NULL) ||
 	                     (app.rtd_task == NULL) ||
@@ -235,8 +283,15 @@ HAL_StatusTypeDef write_time(){
 
 void set_ecu_ok(bool state)
 {
+#if ECU_OUTPUTS_INHIBITED
+    /* Bench/TESTDAY images are compile-time non-authority images.  Keep the
+     * final hardware writer fail-low even if a future caller forgets the
+     * higher-level policy gate or runtime state is corrupted. */
+    state = false;
+#endif
 	app.fw_state = state;
-	HAL_GPIO_WritePin(Firmware_Ok_GPIO_Port, Firmware_Ok_Pin, state);
+	HAL_GPIO_WritePin(Firmware_Ok_GPIO_Port, Firmware_Ok_Pin,
+	                  state ? GPIO_PIN_SET : GPIO_PIN_RESET);
 }
 
 void set_buzzer(bool state)
@@ -246,14 +301,22 @@ void set_buzzer(bool state)
 
 void set_cascadia_enable(bool state)
 {
+#if ECU_OUTPUTS_INHIBITED
+    state = false;
+#endif
 	app.cascadia_en = state;
-	HAL_GPIO_WritePin(MTR_EN_GPIO_Port, MTR_EN_Pin, state);
+	HAL_GPIO_WritePin(MTR_EN_GPIO_Port, MTR_EN_Pin,
+	                  state ? GPIO_PIN_SET : GPIO_PIN_RESET);
 }
 
 void set_cascadia_on(bool state)
 {
+#if ECU_OUTPUTS_INHIBITED
+    state = false;
+#endif
 	app.cascadia_on = state;
-	HAL_GPIO_WritePin(Cascadia_ON_GPIO_Port, Cascadia_ON_Pin, state);
+	HAL_GPIO_WritePin(Cascadia_ON_GPIO_Port, Cascadia_ON_Pin,
+	                  state ? GPIO_PIN_SET : GPIO_PIN_RESET);
 }
 
 void set_brakelight(bool state)

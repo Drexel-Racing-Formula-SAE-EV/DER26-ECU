@@ -29,9 +29,154 @@ static int16_t s16_be(const uint8_t *data)
     return (int16_t)u16_be(data);
 }
 
+static uint32_t u32_be(const uint8_t *data)
+{
+    return ((uint32_t)data[0] << 24u) |
+           ((uint32_t)data[1] << 16u) |
+           ((uint32_t)data[2] << 8u) |
+           (uint32_t)data[3];
+}
+
 static bool bit_is_set(uint8_t value, uint8_t bit)
 {
     return ((value & (uint8_t)(1u << bit)) != 0u);
+}
+
+static void sat_inc_u32(uint32_t *value)
+{
+    if((value != NULL) && (*value != UINT32_MAX))
+    {
+        (*value)++;
+    }
+}
+
+static void sat_add_u32(uint32_t *value, uint32_t add)
+{
+    if(value == NULL)
+    {
+        return;
+    }
+    if(UINT32_MAX - *value < add)
+    {
+        *value = UINT32_MAX;
+    }
+    else
+    {
+        *value += add;
+    }
+}
+
+static uint8_t popcount8(uint8_t value)
+{
+    uint8_t count = 0u;
+    while(value != 0u)
+    {
+        count = (uint8_t)(count + (value & 1u));
+        value >>= 1u;
+    }
+    return count;
+}
+
+static void logger_reset_fragment_tracking(ams_t *dev, uint8_t seq5)
+{
+    dev->logger_fragment_seq_valid = true;
+    dev->logger_fragment_seq5 = (uint8_t)(seq5 & AMS_LOGGER_FRAGMENT_SEQ_MASK);
+    dev->logger_phase_seen_mask = 0u;
+    memset(dev->logger_cell_fragment_mask, 0,
+           sizeof(dev->logger_cell_fragment_mask));
+    memset(dev->logger_temp_fragment_mask, 0,
+           sizeof(dev->logger_temp_fragment_mask));
+    dev->logger_snapshot_complete = false;
+}
+
+static void logger_recompute_complete(ams_t *dev)
+{
+    uint8_t expected_phases = dev->logger_phase_count;
+    if((expected_phases == 0u) || (expected_phases > NSEGS))
+    {
+        expected_phases = NSEGS;
+    }
+    uint8_t expected_phase_mask =
+        (uint8_t)((1u << expected_phases) - 1u);
+    bool complete =
+        ((dev->logger_phase_seen_mask & expected_phase_mask) ==
+         expected_phase_mask);
+    for(uint8_t phase = 0u; phase < expected_phases; phase++)
+    {
+        complete = complete &&
+            ((dev->logger_cell_fragment_mask[phase] & 0x1Fu) == 0x1Fu) &&
+            (dev->logger_temp_fragment_mask[phase] == 0xFFu);
+    }
+    dev->logger_snapshot_complete = complete;
+}
+
+static void logger_finalize_fragment_tracking(ams_t *dev)
+{
+    if((dev == NULL) || !dev->logger_fragment_seq_valid)
+    {
+        return;
+    }
+
+    uint8_t expected_phases = dev->logger_phase_count;
+    if((expected_phases == 0u) || (expected_phases > NSEGS))
+    {
+        expected_phases = NSEGS;
+    }
+    uint8_t expected_phase_mask =
+        (uint8_t)((1u << expected_phases) - 1u);
+    uint8_t missing_phases = (uint8_t)(expected_phase_mask &
+                                       ~dev->logger_phase_seen_mask);
+    uint32_t missing_cells = 0u;
+    uint32_t missing_temps = 0u;
+    for(uint8_t phase = 0u; phase < expected_phases; phase++)
+    {
+        missing_cells += popcount8((uint8_t)(0x1Fu &
+            ~dev->logger_cell_fragment_mask[phase]));
+        missing_temps += popcount8((uint8_t)(0xFFu &
+            ~dev->logger_temp_fragment_mask[phase]));
+    }
+
+    uint32_t phase_gaps = popcount8(missing_phases);
+    sat_add_u32(&dev->logger_phase_gap_count, phase_gaps);
+    sat_add_u32(&dev->logger_cell_fragment_gap_count, missing_cells);
+    sat_add_u32(&dev->logger_temp_fragment_gap_count, missing_temps);
+    if((phase_gaps != 0u) || (missing_cells != 0u) || (missing_temps != 0u))
+    {
+        sat_inc_u32(&dev->logger_incomplete_snapshot_count);
+        dev->logger_snapshot_complete = false;
+    }
+    else
+    {
+        dev->logger_snapshot_complete = true;
+    }
+}
+
+/* Returns true when the fragment belongs to the current/new snapshot. Older
+ * modulo-32 fragments are observable but never allowed to roll tracking back. */
+static bool logger_note_fragment_sequence(ams_t *dev, uint8_t seq5)
+{
+    seq5 &= AMS_LOGGER_FRAGMENT_SEQ_MASK;
+    if(!dev->logger_fragment_seq_valid)
+    {
+        logger_reset_fragment_tracking(dev, seq5);
+        return true;
+    }
+    if(seq5 == dev->logger_fragment_seq5)
+    {
+        return true;
+    }
+
+    uint8_t delta = (uint8_t)((seq5 - dev->logger_fragment_seq5) &
+                              AMS_LOGGER_FRAGMENT_SEQ_MASK);
+    if((delta != 0u) && (delta < 16u))
+    {
+        logger_finalize_fragment_tracking(dev);
+        logger_reset_fragment_tracking(dev, seq5);
+        return true;
+    }
+
+    sat_inc_u32(&dev->logger_out_of_order_count);
+    return false;
 }
 
 static void mark_rx(ams_t *dev, uint32_t now_ms)
@@ -548,6 +693,154 @@ static bool ams_parse_current_diag_frame(ams_t *dev,
     return true;
 }
 
+bool ams_is_logger_can_id(uint32_t std_id)
+{
+    return (std_id >= AMS_LOGGER_CAN_ID_FIRST) &&
+           (std_id <= AMS_LOGGER_CAN_ID_LAST);
+}
+
+static bool ams_parse_logger_frame(ams_t *dev,
+                                   uint32_t std_id,
+                                   const uint8_t *data,
+                                   uint8_t dlc,
+                                   uint32_t now_ms)
+{
+    if((dev == NULL) || (data == NULL) || (dlc != AMS_FRAME_DLC) ||
+       !ams_is_logger_can_id(std_id))
+    {
+        if(dev != NULL) dev->logger_bad_count++;
+        return false;
+    }
+
+    dev->logger_last_id = (uint16_t)std_id;
+    dev->logger_last_rx_tick = now_ms;
+    if(dev->logger_rx_count != UINT32_MAX) dev->logger_rx_count++;
+
+    switch(std_id)
+    {
+    case AMS_LOGGER_CAN_ID_HEARTBEAT:
+        dev->logger_protocol_version = data[0];
+        dev->logger_sequence = data[1];
+        break;
+    case AMS_LOGGER_CAN_ID_SNAPSHOT_META:
+    {
+        const uint8_t old_sequence = dev->logger_snapshot_sequence;
+        const uint8_t old_version = dev->logger_snapshot_version;
+        dev->logger_snapshot_version = data[0];
+        dev->logger_snapshot_sequence = data[1];
+        dev->logger_phase = data[2];
+        dev->logger_phase_count = data[3];
+        dev->logger_measurement_sequence = u32_be(&data[4]);
+
+        if((old_version == AMS_LOGGER_SNAPSHOT_VERSION_V4) &&
+           (dev->logger_snapshot_version == AMS_LOGGER_SNAPSHOT_VERSION_V4) &&
+           (old_sequence != dev->logger_snapshot_sequence))
+        {
+            uint8_t delta = (uint8_t)(dev->logger_snapshot_sequence -
+                                      old_sequence);
+            if((delta != 0u) && (delta < 128u) && (delta > 1u))
+            {
+                sat_add_u32(&dev->logger_snapshot_gap_count,
+                            (uint32_t)(delta - 1u));
+            }
+        }
+
+        if(dev->logger_snapshot_version == AMS_LOGGER_SNAPSHOT_VERSION_V4)
+        {
+            const uint8_t seq5 = (uint8_t)(data[1] &
+                AMS_LOGGER_FRAGMENT_SEQ_MASK);
+            if(logger_note_fragment_sequence(dev, seq5) &&
+               (data[2] < NSEGS))
+            {
+                const uint8_t bit = (uint8_t)(1u << data[2]);
+                if((dev->logger_phase_seen_mask & bit) != 0u)
+                {
+                    sat_inc_u32(&dev->logger_duplicate_fragment_count);
+                }
+                dev->logger_phase_seen_mask |= bit;
+                logger_recompute_complete(dev);
+            }
+        }
+        break;
+    }
+    case AMS_LOGGER_CAN_ID_CELL_DETAIL:
+    {
+        const uint8_t phase = ams_logger_phase_from_tag(data[0]);
+        const uint8_t seq5 = ams_logger_seq5_from_tag(data[0]);
+        const uint8_t fragment = (uint8_t)(data[1] / 3u);
+        if(logger_note_fragment_sequence(dev, seq5) &&
+           (phase < NSEGS) && (fragment < 5u))
+        {
+            const uint8_t bit = (uint8_t)(1u << fragment);
+            if((dev->logger_cell_fragment_mask[phase] & bit) != 0u)
+            {
+                sat_inc_u32(&dev->logger_duplicate_fragment_count);
+            }
+            dev->logger_cell_fragment_mask[phase] |= bit;
+            logger_recompute_complete(dev);
+        }
+        break;
+    }
+    case AMS_LOGGER_CAN_ID_TEMP_DETAIL:
+    {
+        const uint8_t phase = ams_logger_phase_from_tag(data[0]);
+        const uint8_t seq5 = ams_logger_seq5_from_tag(data[0]);
+        const uint8_t fragment = (uint8_t)(data[1] / 3u);
+        if(logger_note_fragment_sequence(dev, seq5) &&
+           (phase < NSEGS) && (fragment < 8u))
+        {
+            const uint8_t bit = (uint8_t)(1u << fragment);
+            if((dev->logger_temp_fragment_mask[phase] & bit) != 0u)
+            {
+                sat_inc_u32(&dev->logger_duplicate_fragment_count);
+            }
+            dev->logger_temp_fragment_mask[phase] |= bit;
+            logger_recompute_complete(dev);
+        }
+        break;
+    }
+    case AMS_LOGGER_CAN_ID_TX_SCHED_DIAG:
+        dev->tx_sched_protected_deadline_miss = u16_be(&data[0]);
+        dev->tx_sched_detail_superseded = u16_be(&data[2]);
+        dev->tx_sched_detail_recovery_discard = u16_be(&data[4]);
+        dev->tx_sched_protected_superseded = data[6];
+        dev->tx_sched_flags = data[7];
+        break;
+    case AMS_LOGGER_CAN_ID_ESTIMATOR_VOLTAGE_COMPARE:
+        dev->estimator_voltage_compare_index = data[0];
+        dev->estimator_voltage_compare_flags = data[1];
+        dev->estimator_avg_minus_raw_mv = s16_be(&data[2]);
+        dev->estimator_iir_minus_raw_mv = s16_be(&data[4]);
+        dev->estimator_voltage_compare_sequence = u16_be(&data[6]);
+        break;
+    case AMS_LOGGER_CAN_ID_APM_SAMPLE:
+        dev->apm_current1_0p01a = s16_be(&data[0]);
+        dev->apm_current2_0p01a = s16_be(&data[2]);
+        dev->apm_voltage1_0p1v = u16_be(&data[4]);
+        dev->apm_voltage2_0p1v = u16_be(&data[6]);
+        break;
+    case AMS_LOGGER_CAN_ID_APM_HEALTH:
+        dev->apm_flags = data[0];
+        dev->apm_stage = data[1];
+        dev->apm_reason = data[2];
+        dev->apm_device_id = data[3];
+        dev->apm_conversion_count = u16_be(&data[4]);
+        dev->apm_sample_age_ms = u16_be(&data[6]);
+        break;
+    case AMS_LOGGER_CAN_ID_APM_RAW:
+        dev->apm_i1_raw = (int32_t)u32_be(&data[0]);
+        dev->apm_vb1_raw = s16_be(&data[4]);
+        dev->apm_i1_phase = data[6];
+        dev->apm_calibration_profile = data[7];
+        break;
+    default:
+        break;
+    }
+
+    mark_rx(dev, now_ms);
+    return true;
+}
+
 bool ams_is_known_can_id(uint32_t std_id)
 {
     return ((std_id == AMS_TELEM_CANBUS_ID) ||
@@ -557,6 +850,7 @@ bool ams_is_known_can_id(uint32_t std_id)
             (std_id == AMS_ECU_THERMAL_CANBUS_ID) ||
             (std_id == AMS_ECU_HEALTH_CANBUS_ID) ||
             (std_id == AMS_ECU_CURRENT_DIAG_CANBUS_ID) ||
+            ams_is_logger_can_id(std_id) ||
             (std_id == DER26_POWER_DCL_ID) ||
             (std_id == DER26_POWER_CCL_ID) ||
             (std_id == DER26_POWER_SOH_ID) ||
@@ -616,6 +910,11 @@ bool ams_parse_can_frame(ams_t *dev, uint32_t std_id, bool is_standard, uint8_t 
     if(std_id == AMS_ECU_CURRENT_DIAG_CANBUS_ID)
     {
         return ams_parse_current_diag_frame(dev, data, dlc, now_ms);
+    }
+
+    if(ams_is_logger_can_id(std_id))
+    {
+        return ams_parse_logger_frame(dev, std_id, data, dlc, now_ms);
     }
 
     if((std_id == DER26_POWER_DCL_ID) ||

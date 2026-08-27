@@ -1,0 +1,191 @@
+{
+  "Core/Src/app.c": {
+    "status": "target-and-static",
+    "target": "task-contract-gate/headless-build",
+    "rationale": "Hardware output ownership and RTOS startup orchestration."
+  },
+  "Core/Src/board.c": {
+    "status": "host-executed",
+    "target": "board-integration"
+  },
+  "Core/Src/ext_drivers/ams.c": {
+    "status": "host-executed",
+    "target": "unit/system-sil/cross-stress"
+  },
+  "Core/Src/ext_drivers/ams_power_consumer.c": {
+    "status": "host-executed",
+    "target": "power-consumer/power-integration"
+  },
+  "Core/Src/ext_drivers/canbus.c": {
+    "status": "host-executed",
+    "target": "drivers/board-integration/cross-stress"
+  },
+  "Core/Src/ext_drivers/cli.c": {
+    "status": "host-executed",
+    "target": "drivers/cross-stress"
+  },
+  "Core/Src/ext_drivers/cm200.c": {
+    "status": "host-executed",
+    "target": "unit/system-sil/cross-stress"
+  },
+  "Core/Src/ext_drivers/dashboard.c": {
+    "status": "host-executed",
+    "target": "drivers/board-integration"
+  },
+  "Core/Src/ext_drivers/ecu_data_logger.c": {
+    "status": "target-and-static",
+    "target": "task-contract-gate/core-host-syntax/headless-build",
+    "rationale": "Best-effort FatFs writer plus ISR/task lock-free CAN ring; target HAL/RTOS and filesystem ownership are syntax/static checked."
+  },
+  "Core/Src/ext_drivers/ecu_safety.c": {
+    "status": "host-executed",
+    "target": "unit/system-sil/cross-stress"
+  },
+  "Core/Src/ext_drivers/flow_sensor.c": {
+    "status": "host-executed",
+    "target": "drivers/board-integration/cross-stress"
+  },
+  "Core/Src/ext_drivers/cooling_control.c": {
+    "status": "host-executed",
+    "target": "drivers/board-integration"
+  },
+  "Core/Src/ext_drivers/map.c": {
+    "status": "host-executed",
+    "target": "drivers/board-integration/cross-stress"
+  },
+  "Core/Src/ext_drivers/mpu6050.c": {
+    "status": "host-executed",
+    "target": "drivers/board-integration"
+  },
+  "Core/Src/ext_drivers/ntc.c": {
+    "status": "host-executed",
+    "target": "drivers/board-integration"
+  },
+  "Core/Src/ext_drivers/poten.c": {
+    "status": "host-executed",
+    "target": "drivers/board-integration/cross-stress"
+  },
+  "Core/Src/ext_drivers/pressure_sensor.c": {
+    "status": "host-executed",
+    "target": "drivers/board-integration/cross-stress"
+  },
+  "Core/Src/ext_drivers/pwm.c": {
+    "status": "host-executed",
+    "target": "drivers/board-integration/cross-stress"
+  },
+  "Core/Src/ext_drivers/sdcard_service.c": {
+    "status": "host-executed",
+    "target": "sdcard-service"
+  },
+  "Core/Src/ext_drivers/stm32f767.c": {
+    "status": "target-and-static",
+    "target": "core-host-syntax/headless-build",
+    "rationale": "Cortex-M DWT, HAL ADC, and CMSIS mutex integration."
+  },
+  "Core/Src/freertos.c": {
+    "status": "target-and-static",
+    "target": "static-allocation-gate/headless-build",
+    "rationale": "CubeMX FreeRTOS bootstrap and target hooks."
+  },
+  "Core/Src/main.c": {
+    "status": "target-and-static",
+    "target": "sdcard-contract-gate/fault-path-gate/headless-build",
+    "rationale": "Generated target clock, peripheral, and GPIO initialization."
+  },
+  "Core/Src/power/ecu_current_residual_monitor.c": {
+    "status": "host-executed",
+    "target": "residual-monitor"
+  },
+  "Core/Src/power/ecu_pack_current_calibration.c": {
+    "status": "host-executed",
+    "target": "calibration-artifact"
+  },
+  "Core/Src/power/ecu_pack_current_model.c": {
+    "status": "host-executed",
+    "target": "torque-clamp/rev7-invariants/current-model-differential"
+  },
+  "Core/Src/power/ecu_torque_clamp.c": {
+    "status": "host-executed",
+    "target": "torque-clamp/rev7-invariants"
+  },
+  "Core/Src/stm32f7xx_hal_msp.c": {
+    "status": "target-build",
+    "target": "headless-build",
+    "rationale": "Generated target MSP configuration."
+  },
+  "Core/Src/stm32f7xx_hal_timebase_tim.c": {
+    "status": "target-build",
+    "target": "headless-build",
+    "rationale": "Generated target HAL timebase."
+  },
+  "Core/Src/stm32f7xx_it.c": {
+    "status": "target-and-static",
+    "target": "fault-path-gate/headless-build",
+    "rationale": "Target exception and interrupt vectors."
+  },
+  "Core/Src/syscalls.c": {
+    "status": "target-build",
+    "target": "headless-build",
+    "rationale": "Newlib target syscall glue."
+  },
+  "Core/Src/sysmem.c": {
+    "status": "target-build",
+    "target": "headless-build",
+    "rationale": "Target heap boundary glue; dynamic RTOS allocation remains disabled."
+  },
+  "Core/Src/system_stm32f7xx.c": {
+    "status": "target-build",
+    "target": "headless-build",
+    "rationale": "Vendor CMSIS system startup."
+  },
+  "Core/Src/tasks/acc_task.c": {
+    "status": "target-and-static",
+    "target": "task-contract-gate/core-host-syntax/headless-build",
+    "rationale": "RTOS loop and hardware I2C ownership."
+  },
+  "Core/Src/tasks/apps_task.c": {
+    "status": "target-and-static",
+    "target": "task-contract-gate/core-host-syntax/headless-build",
+    "rationale": "RTOS loop and ADC ownership."
+  },
+  "Core/Src/tasks/bppc_task.c": {
+    "status": "target-and-static",
+    "target": "task-contract-gate/core-host-syntax/headless-build",
+    "rationale": "RTOS loop and discrete-input ownership."
+  },
+  "Core/Src/tasks/bse_task.c": {
+    "status": "target-and-static",
+    "target": "task-contract-gate/core-host-syntax/headless-build",
+    "rationale": "RTOS loop and multiplexed ADC ownership."
+  },
+  "Core/Src/tasks/canbus_task.c": {
+    "status": "target-and-static",
+    "target": "task-contract-gate/core-host-syntax/headless-build",
+    "rationale": "RTOS/CAN ISR coordination and final torque commit."
+  },
+  "Core/Src/tasks/cli_task.c": {
+    "status": "target-and-static",
+    "target": "task-contract-gate/core-host-syntax/headless-build",
+    "rationale": "RTOS CLI and UART interaction."
+  },
+  "Core/Src/tasks/cool_task.c": {
+    "status": "target-and-static",
+    "target": "task-contract-gate/core-host-syntax/headless-build",
+    "rationale": "RTOS cooling sensor/actuator ownership."
+  },
+  "Core/Src/tasks/dashboard_task.c": {
+    "status": "target-and-static",
+    "target": "task-contract-gate/core-host-syntax/headless-build",
+    "rationale": "RTOS dashboard UART ownership."
+  },
+  "Core/Src/tasks/error_task.c": {
+    "status": "target-and-static",
+    "target": "task-contract-gate/core-host-syntax/headless-build",
+    "rationale": "Top-level safety aggregation and watchdog ownership."
+  },
+  "Core/Src/tasks/rtd_task.c": {
+    "status": "target-and-static",
+    "target": "task-contract-gate/core-host-syntax/headless-build",
+    "rationale": "RTOS ready-to-drive output sequencing."
+  }
+}

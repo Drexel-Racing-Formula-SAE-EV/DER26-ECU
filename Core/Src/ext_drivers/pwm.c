@@ -6,10 +6,14 @@
  */
 
 #include "ext_drivers/pwm.h"
+#include <math.h>
+#include <stdint.h>
 
 int pwm_device_init(pwm_t *dev, TIM_TypeDef *timer, TIM_HandleTypeDef *htim, uint64_t max_timer_val, volatile uint32_t *CCR, int channel)
 {
-	if((dev == NULL) || (htim == NULL) || (CCR == NULL) || (max_timer_val == 0u))
+	if((dev == NULL) || (htim == NULL) || (CCR == NULL) ||
+	   (max_timer_val == 0u) || (max_timer_val > UINT32_MAX) ||
+	   (channel < 1) || (channel > 4))
 	{
 		return -1;
 	}
@@ -20,15 +24,17 @@ int pwm_device_init(pwm_t *dev, TIM_TypeDef *timer, TIM_HandleTypeDef *htim, uin
 	dev->max_timer_val = max_timer_val;
 	dev->CCR = CCR;
 
-	HAL_TIM_PWM_Start(htim, (channel - 1) * 4);
-	pwm_set_percent(dev, 0.0);
-
-	return 0;
+	if(HAL_TIM_PWM_Start(htim, (uint32_t)(channel - 1) * 4u) != HAL_OK)
+	{
+		return -1;
+	}
+	return pwm_set_percent(dev, 0.0f);
 }
 
 int pwm_set_percent(pwm_t *dev, float percent)
 {
-	if((dev == NULL) || (dev->CCR == NULL))
+	if((dev == NULL) || (dev->CCR == NULL) ||
+	   (dev->max_timer_val == 0u) || !isfinite(percent))
 	{
 		return -1;
 	}

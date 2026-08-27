@@ -69,7 +69,7 @@ uint8_t pressure_sensor_check_implausibility(float L, float R, int thresh, int c
 	}
 }
 
-uint8_t pressure_sensor_check_failure(float count, int max_thresh, int min_thresh){
+uint8_t pressure_sensor_in_range(float count, int max_thresh, int min_thresh){
 	if(count > max_thresh || count < min_thresh){
 		return 0;
 	} else {
